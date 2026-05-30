@@ -26,6 +26,7 @@ export const en: TranslationMap = {
     copy: "Copy",
     copied: "Copied!",
     copyCode: "Copy code",
+    rename: "Rename",
     delete: "Delete",
     dismiss: "Dismiss",
     unselect: "Unselect",

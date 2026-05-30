@@ -1538,7 +1538,8 @@
 }
 
 .chat-session-picker__option {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -1551,11 +1552,10 @@
   color: var(--text);
   font: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
 .chat-session-picker__option:hover,
-.chat-session-picker__option:focus-visible {
+.chat-session-picker__option:focus-within {
   background: var(--bg-hover);
   border-color: color-mix(in srgb, var(--border) 78%, transparent);
 }
@@ -1569,6 +1569,13 @@
   display: grid;
   gap: 3px;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .chat-session-picker__option-label,
@@ -1603,6 +1610,68 @@
   stroke: currentColor;
   fill: none;
   stroke-width: 1.5px;
+}
+
+.chat-session-picker__option-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-session-picker__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-session-picker__action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-hover) 82%, transparent);
+  border-color: color-mix(in srgb, var(--border) 78%, transparent);
+  color: var(--text);
+}
+
+.chat-session-picker__action--danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.chat-session-picker__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
+.chat-session-picker__action svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.content--chat .chat {
+  background: color-mix(in srgb, var(--bg) 94%, var(--card) 6%) !important;
+}
+
+.content--chat .chat-thread {
+  padding-inline: clamp(12px, 4vw, 64px);
+}
+
+.content--chat .chat-thread-inner {
+  width: min(100%, 980px);
+  margin-inline: auto;
+}
+
+.content--chat .agent-chat__input {
+  width: min(100% - 36px, 980px);
+  margin-inline: auto;
 }
 
 .chat-session-picker__status {

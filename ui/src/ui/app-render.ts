@@ -253,6 +253,7 @@ function isSidebarSessionBusy(state: AppViewState) {
 }
 
 function resolveSidebarRecentSessions(state: AppViewState): GatewaySessionRow[] {
+  const query = state.chatSidebarSessionQuery.trim().toLowerCase();
   return (state.sessionsResult?.sessions ?? [])
     .filter(
       (row) =>
@@ -264,8 +265,15 @@ function resolveSidebarRecentSessions(state: AppViewState): GatewaySessionRow[] 
         !isSubagentSessionKey(row.key) &&
         !row.spawnedBy,
     )
+    .filter((row) => {
+      if (!query) {
+        return true;
+      }
+      const label = resolveSessionDisplayName(row.key, row).toLowerCase();
+      return label.includes(query) || row.key.toLowerCase().includes(query);
+    })
     .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, 5);
+    .slice(0, 24);
 }
 
 function renderSidebarSessions(state: AppViewState) {
@@ -304,7 +312,27 @@ function renderSidebarSessions(state: AppViewState) {
             >`}
       </button>
       ${collapsed || recent.length === 0
-        ? nothing
+        ? collapsed
+          ? nothing
+          : html`
+              <label class="sidebar-session-search">
+                <span class="sidebar-session-search__icon" aria-hidden="true">${icons.search}</span>
+                <input
+                  type="search"
+                  placeholder=${t("chat.selectors.sessionSearch")}
+                  aria-label=${t("chat.selectors.sessionSearch")}
+                  .value=${state.chatSidebarSessionQuery}
+                  @input=${(event: Event) => {
+                    state.chatSidebarSessionQuery = (event.target as HTMLInputElement).value;
+                  }}
+                />
+              </label>
+              <div class="sidebar-recent-sessions__empty">
+                ${state.chatSidebarSessionQuery.trim()
+                  ? "No matching chats"
+                  : "No chat history yet"}
+              </div>
+            `
         : html`
             <div
               class="sidebar-recent-sessions ${state.settings.recentSessionsCollapsed
@@ -312,6 +340,18 @@ function renderSidebarSessions(state: AppViewState) {
                 : ""}"
               aria-label=${t("overview.cards.recentSessions")}
             >
+              <label class="sidebar-session-search">
+                <span class="sidebar-session-search__icon" aria-hidden="true">${icons.search}</span>
+                <input
+                  type="search"
+                  placeholder=${t("chat.selectors.sessionSearch")}
+                  aria-label=${t("chat.selectors.sessionSearch")}
+                  .value=${state.chatSidebarSessionQuery}
+                  @input=${(event: Event) => {
+                    state.chatSidebarSessionQuery = (event.target as HTMLInputElement).value;
+                  }}
+                />
+              </label>
               <button
                 class="sidebar-recent-sessions__label"
                 type="button"

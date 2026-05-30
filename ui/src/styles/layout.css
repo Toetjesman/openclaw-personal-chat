@@ -674,6 +674,59 @@
   margin: 0 -8px;
 }
 
+.sidebar-session-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 8px 4px;
+}
+
+.sidebar-session-search input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px 0 32px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-elevated) 84%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.sidebar-session-search input:focus {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.sidebar-session-search__icon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.sidebar-session-search__icon svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7px;
+}
+
+.sidebar-recent-sessions__empty {
+  margin: 0 8px;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px dashed color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: var(--radius-md);
+}
+
 .sidebar-recent-sessions__label {
   display: flex;
   align-items: center;
@@ -734,6 +787,10 @@
 .sidebar-recent-sessions__list {
   display: grid;
   gap: 4px;
+  max-height: min(52vh, 620px);
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
 }
 
 .sidebar-recent-session {

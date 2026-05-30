@@ -9,7 +9,7 @@ import {
   resolveChatModelSelectState,
 } from "../chat-model-select-state.ts";
 import { refreshVisibleToolsEffectiveForCurrentSession } from "../controllers/agents.ts";
-import { loadSessions } from "../controllers/sessions.ts";
+import { deleteSessionsAndRefresh, loadSessions } from "../controllers/sessions.ts";
 import { formatDateTimeMs } from "../format.ts";
 import { icons } from "../icons.ts";
 import { isMonitoredAuthProvider } from "../model-auth-helpers.ts";
@@ -439,6 +439,55 @@ async function loadMoreChatSessionPickerResults(state: AppViewState) {
   });
 }
 
+async function renameChatSession(state: AppViewState, row: SessionsListResult["sessions"][number]) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const currentLabel = resolveSessionDisplayName(row.key, row);
+  const nextLabel = window.prompt(t("common.rename"), currentLabel)?.trim();
+  if (nextLabel === undefined || nextLabel === currentLabel) {
+    return;
+  }
+  try {
+    await state.client.request("sessions.patch", {
+      key: row.key,
+      label: nextLabel || null,
+    });
+    await refreshSessionOptions(state);
+    if (state.chatSessionPickerOpen) {
+      await loadChatSessionPickerPage(state, {
+        query: state.chatSessionPickerAppliedQuery,
+      });
+    }
+  } catch (err) {
+    state.lastError = `Failed to rename chat: ${String(err)}`;
+  } finally {
+    requestHostUpdate(state);
+  }
+}
+
+async function deleteChatSessionFromPicker(
+  state: AppViewState,
+  row: SessionsListResult["sessions"][number],
+) {
+  const deleted = await deleteSessionsAndRefresh(state, [row.key]);
+  if (deleted.length === 0) {
+    return;
+  }
+  state.chatSessionPickerResult = null;
+  if (row.key === state.sessionKey) {
+    state.chatMessages = [];
+    state.chatToolMessages = [];
+    state.chatStream = null;
+  }
+  if (state.chatSessionPickerOpen) {
+    await loadChatSessionPickerPage(state, {
+      query: state.chatSessionPickerAppliedQuery,
+    });
+  }
+  requestHostUpdate(state);
+}
+
 function resolveChatSessionRow(
   state: AppViewState,
   sessionKey: string,
@@ -648,33 +697,64 @@ function renderChatSessionPickerPopover(
             const meta = formatChatSessionPickerMeta(row);
             const selected = row.key === state.sessionKey;
             return html`
-              <button
+              <div
                 class="chat-session-picker__option ${selected
                   ? "chat-session-picker__option--selected"
                   : ""}"
-                data-chat-session-picker-option="true"
                 data-session-key=${row.key}
                 role="option"
                 aria-selected=${selected ? "true" : "false"}
-                title=${label}
-                type="button"
-                @click=${() => {
-                  closeChatSessionPicker(state);
-                  if (row.key !== state.sessionKey) {
-                    onSwitchSession(state, row.key);
-                  }
-                }}
               >
-                <span class="chat-session-picker__option-main">
+                <button
+                  class="chat-session-picker__option-main"
+                  data-chat-session-picker-option="true"
+                  data-session-key=${row.key}
+                  title=${label}
+                  type="button"
+                  @click=${() => {
+                    closeChatSessionPicker(state);
+                    if (row.key !== state.sessionKey) {
+                      onSwitchSession(state, row.key);
+                    }
+                  }}
+                >
                   <span class="chat-session-picker__option-label">${label}</span>
                   ${meta ? html`<span class="chat-session-picker__option-meta">${meta}</span>` : ""}
+                </button>
+                <span class="chat-session-picker__option-actions">
+                  <button
+                    class="chat-session-picker__action"
+                    type="button"
+                    title=${t("common.rename")}
+                    aria-label=${t("common.rename")}
+                    ?disabled=${controlsDisabled}
+                    @click=${(event: Event) => {
+                      event.stopPropagation();
+                      void renameChatSession(state, row);
+                    }}
+                  >
+                    ${icons.edit}
+                  </button>
+                  <button
+                    class="chat-session-picker__action chat-session-picker__action--danger"
+                    type="button"
+                    title=${t("common.delete")}
+                    aria-label=${t("common.delete")}
+                    ?disabled=${controlsDisabled}
+                    @click=${(event: Event) => {
+                      event.stopPropagation();
+                      void deleteChatSessionFromPicker(state, row);
+                    }}
+                  >
+                    ${icons.trash}
+                  </button>
+                  ${selected
+                    ? html`<span class="chat-session-picker__option-check" aria-hidden="true">
+                        ${icons.check}
+                      </span>`
+                    : ""}
                 </span>
-                ${selected
-                  ? html`<span class="chat-session-picker__option-check" aria-hidden="true">
-                      ${icons.check}
-                    </span>`
-                  : ""}
-              </button>
+              </div>
             `;
           },
         )}

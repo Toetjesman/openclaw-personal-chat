@@ -127,6 +127,30 @@ openclaw gateway stop
 openclaw gateway --port 18789 --verbose
 ```
 
+## Personal Chat UI fork
+
+This branch customizes the browser Control UI for a chat-first personal workflow:
+
+- left sidebar with recent chat history and local session search
+- New Chat shortcut in the sidebar and composer controls
+- old chats open through OpenClaw `sessions.list` and `chat.history`
+- chat rename and delete actions through OpenClaw Gateway session RPCs
+- no browser calls to DeepSeek; the UI still talks only to the OpenClaw Gateway
+
+Local setup on another laptop:
+
+```powershell
+git clone https://github.com/<your-account>/openclaw-personal-chat.git
+cd openclaw-personal-chat
+corepack enable
+pnpm install
+pnpm ui:build
+openclaw gateway
+```
+
+Open `http://127.0.0.1:18789/`. Keep API keys and gateway tokens in local OpenClaw
+config or environment variables; do not commit secrets.
+
 Send a test message or ask the assistant after either startup mode is running:
 
 ```bash

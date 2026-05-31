@@ -365,6 +365,63 @@ function sanitizeGeneratedSessionTitle(value: string | null | undefined): string
   return null;
 }
 
+function extractUserTitleContextMessages(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) =>
+      line.replace(/^\s*(?:Nieuw bericht|Gebruiker|User)\s*:\s*/i, "").trim(),
+    )
+    .filter((line) => line.length > 0);
+}
+
+function normalizeTitleComparisonWords(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+}
+
+function titleCopiesUserMessage(title: string, userMessages: string[]): boolean {
+  const titleWords = normalizeTitleComparisonWords(title);
+  if (titleWords.length < 5) {
+    return false;
+  }
+  for (const message of userMessages) {
+    const messageWords = normalizeTitleComparisonWords(message);
+    if (messageWords.length < titleWords.length) {
+      continue;
+    }
+    const prefix = messageWords.slice(0, titleWords.length);
+    const samePrefixWords = titleWords.filter((word, index) => prefix[index] === word).length;
+    if (samePrefixWords / titleWords.length >= 0.8) {
+      return true;
+    }
+    const titleWordSet = new Set(titleWords);
+    const overlap = messageWords.filter((word) => titleWordSet.has(word)).length;
+    if (overlap / titleWords.length >= 0.9 && titleWords.length >= 7) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function sanitizeAiGeneratedSessionTitle(params: {
+  value: string | null | undefined;
+  titleContext: string;
+}): string | null {
+  const title = sanitizeGeneratedSessionTitle(params.value);
+  if (!title) {
+    return null;
+  }
+  if (titleCopiesUserMessage(title, extractUserTitleContextMessages(params.titleContext))) {
+    return null;
+  }
+  return title;
+}
+
 function fallbackGeneratedSessionTitle(value: string | null | undefined): string | null {
   const raw = normalizeOptionalString(value);
   if (!raw) {
@@ -2542,24 +2599,26 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const agentId = normalizeAgentId(
       requestedAgentId ?? target.agentId ?? resolveDefaultAgentId(cfg),
     );
-    const generated =
-      sanitizeGeneratedSessionTitle(
-        await generateConversationLabel({
-          cfg,
-          agentId,
-          agentDir: resolveAgentWorkspaceDir(cfg, agentId),
-          userMessage: titleContext,
-          maxLength: 80,
-          prompt:
-            'Return only minified JSON in this exact shape: {"title":"..."} ' +
-            "You are naming a private ChatGPT-style conversation for a sidebar. " +
-            "The title must summarize only the user's request/topic from the Gebruikersberichten section. " +
-            "Do not copy assistant/tool-result wording, greetings, jokes, or response phrasing. " +
-            "Never write explanation, markdown, quotes around the JSON, XML, labels, or phrases like 'here is', 'I suggest', or 'title:'. " +
-            "Use the same language as the latest user message. Keep title specific, friendly, and 2-7 words. " +
-            'Bad: {"title":"Here is a title I suggest: API Setup Help"}. Good: {"title":"API Setup Help"}.',
-        }),
-      ) ?? fallbackGeneratedSessionTitle(titleContext);
+    const generated = sanitizeAiGeneratedSessionTitle({
+      titleContext,
+      value: await generateConversationLabel({
+        cfg,
+        agentId,
+        agentDir: resolveAgentWorkspaceDir(cfg, agentId),
+        userMessage: titleContext,
+        maxLength: 80,
+        prompt:
+          'Return only minified JSON in this exact shape: {"title":"..."} ' +
+          "You are naming a private ChatGPT-style conversation for a sidebar. " +
+          "The title must summarize only the user's request/topic from the Gebruikersberichten section. " +
+          "Do not copy the user's sentence. Compress it into a short topic label, like ChatGPT's sidebar titles. " +
+          "Do not copy assistant/tool-result wording, greetings, jokes, or response phrasing. " +
+          "Never write explanation, markdown, quotes around the JSON, XML, labels, or phrases like 'here is', 'I suggest', or 'title:'. " +
+          "Use the same language as the latest user message. Keep title specific, friendly, and 2-7 words. " +
+          'Bad: {"title":"Can you make a planning for next week"}. Good: {"title":"Planning Volgende Week"}. ' +
+          'Bad: {"title":"Here is a title I suggest: API Setup Help"}. Good: {"title":"API Setup Help"}.',
+      }),
+    });
     if (!generated) {
       respond(true, {
         ok: true,

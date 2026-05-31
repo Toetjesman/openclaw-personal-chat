@@ -9,6 +9,7 @@ import {
   flushChatQueueForEvent,
   hasReconnectableQueuedChatSends,
   markQueuedChatSendsWaitingForReconnect,
+  maybeAutoTitleChatSession,
   refreshChatAvatar,
   retryReconnectableQueuedChatSends,
   scopedAgentParamsForSession,
@@ -783,6 +784,9 @@ function handleTerminalChatEvent(
   }
   if (isEventForDifferentActiveRun(payload, activeRunIdBeforeEvent)) {
     return false;
+  }
+  if (state === "final") {
+    void maybeAutoTitleChatSession(host, payload?.sessionKey ?? host.sessionKey);
   }
   // Check if tool events were seen before resetting (resetToolStream clears toolStreamOrder).
   const toolHost = host as unknown as Parameters<typeof resetToolStream>[0];

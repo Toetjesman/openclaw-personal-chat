@@ -228,17 +228,22 @@ function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
   return Boolean(row) && !sessionAlreadyHasFriendlyTitle(row);
 }
 
-async function maybeAutoTitleChatSession(host: ChatHost, sessionKey: string, message: string) {
+export async function maybeAutoTitleChatSession(
+  host: ChatHost,
+  sessionKey: string,
+  message?: string,
+) {
   if (!host.client || !host.connected || !shouldAutoTitleSession(host, sessionKey)) {
     return;
   }
-  if (!normalizeOptionalString(message) || message.trim().startsWith("/")) {
+  const normalizedMessage = normalizeOptionalString(message);
+  if (normalizedMessage?.startsWith("/")) {
     return;
   }
   try {
     const payload = (await host.client.request("sessions.title", {
       key: sessionKey,
-      message,
+      ...(normalizedMessage ? { message: normalizedMessage } : {}),
     })) as { label?: string | null; updated?: boolean };
     const title = normalizeOptionalString(payload?.label);
     if (!title) {
@@ -641,6 +646,7 @@ async function sendQueuedChatMessage(
           },
         );
         void loadChatHistory(host as unknown as ChatState);
+        void maybeAutoTitleChatSession(host, sessionKey);
       } else {
         host.chatRunId = ack.runId;
         host.chatStream = "";
@@ -1190,12 +1196,10 @@ export async function handleSendChat(
       if (messageOverride == null) {
         recordNonTranscriptInputHistory(host, message);
       }
-      void maybeAutoTitleChatSession(host, submittedSessionKey, message);
       enqueueChatMessage(host, message, attachmentsToSend, refreshSessions);
       return;
     }
 
-    void maybeAutoTitleChatSession(host, submittedSessionKey, message);
     await sendChatMessageNow(host, message, {
       previousDraft: cleared.previousDraft,
       restoreDraft: Boolean(messageOverride && opts?.restoreDraft),

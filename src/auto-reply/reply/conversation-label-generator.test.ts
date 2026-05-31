@@ -130,7 +130,7 @@ describe("generateConversationLabel", () => {
     });
     expect(call[2].apiKey).toBe("resolved-key");
     expect(call[2].maxTokens).toBe(100);
-    expect(call[2].temperature).toBe(0.3);
+    expect(call[2].temperature).toBe(0.1);
     expect(call[2].signal).toBeInstanceOf(AbortSignal);
   });
 

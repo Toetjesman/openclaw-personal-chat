@@ -85,7 +85,7 @@ export async function generateConversationLabel(
       {
         apiKey,
         maxTokens: 100,
-        ...(isCodexSimpleCompletionModel(completionModel) ? {} : { temperature: 0.3 }),
+        ...(isCodexSimpleCompletionModel(completionModel) ? {} : { temperature: 0.1 }),
         signal: controller.signal,
       },
     );

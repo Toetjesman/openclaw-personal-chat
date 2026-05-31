@@ -257,33 +257,38 @@ function isNewChatPlaceholderLabel(label: string | undefined | null): boolean {
 }
 
 function extractGeneratedTitleJson(value: string): string | null {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return null;
-    }
-    const record = parsed as Record<string, unknown>;
-    for (const field of ["title", "label", "name"]) {
-      const title = normalizeOptionalString(record[field]);
-      if (title) {
-        return title;
+  const candidates = [value];
+  const objectMatch = value.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0] && objectMatch[0] !== value) {
+    candidates.unshift(objectMatch[0]);
+  }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        continue;
       }
+      const record = parsed as Record<string, unknown>;
+      for (const field of ["title", "label", "name"]) {
+        const title = normalizeOptionalString(record[field]);
+        if (title) {
+          return title;
+        }
+      }
+    } catch {
+      continue;
     }
-  } catch {
-    return null;
   }
   return null;
 }
 
-function sanitizeGeneratedSessionTitle(value: string | null | undefined): string | null {
+function cleanGeneratedSessionTitleCandidate(value: string | null | undefined): string | null {
   const raw = normalizeOptionalString(value);
   if (!raw) {
     return null;
   }
-  const jsonTitle = extractGeneratedTitleJson(raw);
-  let cleaned = normalizeOptionalString(jsonTitle ?? raw) ?? "";
-  cleaned =
-    cleaned
+  let cleaned = raw;
+  cleaned = cleaned
       .replace(/```(?:json|text)?/gi, "")
       .replace(/```/g, "")
       .split(/\r?\n/)
@@ -311,10 +316,40 @@ function sanitizeGeneratedSessionTitle(value: string | null | undefined): string
   if (words.length > 7) {
     cleaned = words.slice(0, 7).join(" ");
   }
-  if (!cleaned || cleaned.length < 3) {
+  if (
+    /\b(?:here(?:'|â€™)?s|here\s+is|i\s+(?:suggest|propose|recommend)|suggested|recommended)\b/i.test(
+      cleaned,
+    ) ||
+    /\btitle\s+i\s+(?:suggest|propose|recommend)\b/i.test(cleaned)
+  ) {
+    return null;
+  }
+  if (!cleaned || cleaned.length < 3 || isNewChatPlaceholderLabel(cleaned)) {
     return null;
   }
   return cleaned.slice(0, 80).replace(/[.!?]+$/g, "");
+}
+
+function sanitizeGeneratedSessionTitle(value: string | null | undefined): string | null {
+  const raw = normalizeOptionalString(value);
+  if (!raw) {
+    return null;
+  }
+  const jsonTitle = extractGeneratedTitleJson(raw);
+  for (const candidate of [
+    jsonTitle,
+    ...raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+    raw,
+  ]) {
+    const cleaned = cleanGeneratedSessionTitleCandidate(candidate);
+    if (cleaned) {
+      return cleaned;
+    }
+  }
+  return null;
 }
 
 function fallbackGeneratedSessionTitle(value: string | null | undefined): string | null {
@@ -2476,11 +2511,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           userMessage: titleContext,
           maxLength: 80,
           prompt:
-            "You generate compact chat titles for a ChatGPT-like sidebar. " +
-            "Return exactly one title and nothing else. Do not explain, do not mention that you suggest a title, " +
-            "do not use labels like 'Title:', do not use quotes, and do not use markdown. " +
-            "Use the same language as the user's latest message. Keep it specific, friendly, and at most 7 words. " +
-            'Bad output: "Here\'s a new title I suggest: API Setup Help". Good output: "API Setup Help".',
+            'Return only minified JSON in this exact shape: {"title":"..."} ' +
+            "You are naming a private ChatGPT-style conversation for a sidebar. " +
+            "The title must summarize the user's actual topic, not your action. " +
+            "Never write explanation, markdown, quotes around the JSON, XML, labels, or phrases like 'here is', 'I suggest', or 'title:'. " +
+            "Use the same language as the latest user message. Keep title specific, friendly, and 2-7 words. " +
+            'Bad: {"title":"Here is a title I suggest: API Setup Help"}. Good: {"title":"API Setup Help"}.',
         }),
       ) ?? fallbackGeneratedSessionTitle(titleContext);
     if (!generated) {

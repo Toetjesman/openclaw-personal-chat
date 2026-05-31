@@ -13,23 +13,27 @@ This folder contains the Windows packaging path for OpenClaw Personal Chat.
 From the repository root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\installer\windows\Build-Installer.ps1 -Version 0.1.0
+  powershell -ExecutionPolicy Bypass -File .\installer\windows\Build-Installer.ps1 -Version 0.1.1
 ```
 
 The installer is written to:
 
 ```text
-release\OpenClawPersonalChat-Setup-0.1.0.exe
+release\OpenClawPersonalChat-Setup-0.1.1.exe
 ```
 
 ## What the installer does
 
 - Installs this repository into `%LOCALAPPDATA%\OpenClawPersonalChat\repo`.
+- Reuses the same Inno Setup `AppId`, so running a newer installer updates the existing OpenClaw Personal Chat install instead of creating a second app.
+- Reuses the previous install directory and selected tasks when Windows/Inno has a previous install record.
+- Stops the local OpenClaw Gateway before updating files and restarts it when the launcher opens.
 - Creates Start Menu shortcuts.
 - Optionally creates a desktop shortcut.
 - Optionally creates a logon scheduled task for the local OpenClaw Gateway.
 - Detects an existing local `openclaw` command and reuses its current config, auth profiles, API keys, sessions, and Gateway token.
-- If OpenClaw is missing, attempts `npm install -g openclaw`; the user still completes normal OpenClaw onboarding for API keys on that laptop.
+- Installs the bundled OpenClaw runtime tarball with `npm install -g --force`, so same-version UI/runtime fixes still replace the old local runtime.
+- Writes `install-info.json` and setup logs under `%LOCALAPPDATA%\OpenClawPersonalChat` to record whether the run was an upgrade or a fresh install.
 
 The installer does not include or write DeepSeek API keys, OpenClaw tokens, or other secrets. Existing OpenClaw credentials are auto-detected and reused.
 

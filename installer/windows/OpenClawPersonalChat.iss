@@ -2,7 +2,7 @@
 #define MyAppPublisher "OpenClaw"
 #define MyAppExeName "OpenClawChat.cmd"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #endif
 #ifndef SourceRoot
 #define SourceRoot "..\..\"
@@ -19,6 +19,8 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\OpenClawPersonalChat
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+UsePreviousAppDir=yes
+UsePreviousTasks=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -27,6 +29,7 @@ OutputBaseFilename=OpenClawPersonalChat-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
@@ -48,7 +51,7 @@ Name: "{group}\Start OpenClaw Gateway"; Filename: "{app}\StartOpenClawGateway.cm
 Name: "{commondesktop}\OpenClaw Chat"; Filename: "{app}\OpenClawChat.cmd"; WorkingDir: "{app}\repo"; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Setup-OpenClawPersonalChat.ps1"" -InstallRoot ""{app}"" -RepoRoot ""{app}\repo"" -CreateAutostart ""{code:GetAutostartFlag}"""; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Setup-OpenClawPersonalChat.ps1"" -InstallRoot ""{app}"" -RepoRoot ""{app}\repo"" -CreateAutostart ""{code:GetAutostartFlag}"" -AppVersion ""{#MyAppVersion}"""; Flags: runhidden waituntilterminated
 Filename: "{app}\OpenClawChat.cmd"; Description: "Open OpenClaw Chat"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$InstallRoot,
   [Parameter(Mandatory = $true)][string]$RepoRoot,
-  [string]$CreateAutostart = "false"
+  [string]$CreateAutostart = "false",
+  [string]$AppVersion = "0.1.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,9 +63,14 @@ function Get-InstalledOpenClawVersion {
   return $null
 }
 
+$installInfoPath = Join-Path $InstallRoot "install-info.json"
+$legacyStatusPath = Join-Path $InstallRoot "logs\detected-openclaw.txt"
+$existingInstallDetected = (Test-Path $installInfoPath) -or (Test-Path $legacyStatusPath)
+
 $logDir = Join-Path $InstallRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Remove-Item -LiteralPath (Join-Path $logDir "setup-warning.txt") -ErrorAction SilentlyContinue
+Set-Content -Path (Join-Path $logDir "setup-mode.txt") -Value $(if ($existingInstallDetected) { "upgrade" } else { "fresh-install" })
 
 if (-not (Test-Command "node")) {
   Set-Content -Path (Join-Path $logDir "setup-warning.txt") -Value "Node.js is missing. Install Node.js 22.19+ before starting OpenClaw Personal Chat."
@@ -119,6 +125,20 @@ if ($runtimeInstallSkipped) {
 } else {
   Set-Content -Path (Join-Path $logDir "setup-warning.txt") -Value "npm is missing. Install Node.js 22.19+ with npm before starting OpenClaw Personal Chat."
 }
+
+$installInfo = [ordered]@{
+  appName = "OpenClaw Personal Chat"
+  appVersion = $AppVersion
+  installMode = $(if ($existingInstallDetected) { "upgrade" } else { "fresh-install" })
+  installedAt = (Get-Date).ToString("o")
+  installRoot = $InstallRoot
+  repoRoot = $RepoRoot
+  openClawVersionBefore = $installedVersion
+  openClawVersionAfter = Get-InstalledOpenClawVersion
+  reusedExistingOpenClawProfile = $true
+  secretsWritten = $false
+}
+$installInfo | ConvertTo-Json -Depth 4 | Set-Content -Path $installInfoPath
 
 if (Test-Command "openclaw") {
   $openclawPath = (Get-Command "openclaw").Source

@@ -265,6 +265,10 @@ export class OpenClawApp extends LitElement {
   @state() chatSessionPickerError: string | null = null;
   @state() chatSessionPickerResult: SessionsListResult | null = null;
   @state() chatSidebarSessionQuery = "";
+  @state() chatSidebarSessionAppliedQuery = "";
+  @state() chatSidebarSessionSearchIndex: AppViewState["chatSidebarSessionSearchIndex"] = {};
+  @state() chatHistoryDialogOpen = false;
+  @state() chatHistoryDialogQuery = "";
   private sessionSwitchNoticeSeq = 0;
   private sessionSwitchNoticeTimer: number | null = null;
   private sessionSwitchFlashTimer: number | null = null;

@@ -224,6 +224,11 @@ export function deriveSessionTitle(
     return undefined;
   }
 
+  // AI-generated auto-title takes highest priority when available.
+  if (normalizeOptionalString(entry.autoTitle)) {
+    return normalizeOptionalString(entry.autoTitle);
+  }
+
   if (normalizeOptionalString(entry.displayName)) {
     return normalizeOptionalString(entry.displayName);
   }
@@ -2061,6 +2066,7 @@ export function buildGatewaySessionRow(params: {
     label: entry?.label,
     displayName,
     derivedTitle,
+    autoTitle: entry?.autoTitle,
     lastMessagePreview,
     channel,
     subject,

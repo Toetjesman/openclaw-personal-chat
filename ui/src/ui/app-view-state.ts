@@ -134,6 +134,17 @@ export type AppViewState = {
   chatSessionPickerError: string | null;
   chatSessionPickerResult: SessionsListResult | null;
   chatSidebarSessionQuery: string;
+  chatSidebarSessionAppliedQuery: string;
+  chatSidebarSessionSearchIndex: Record<
+    string,
+    {
+      loading?: boolean;
+      text: string;
+      updatedAt: number | null;
+    }
+  >;
+  chatHistoryDialogOpen: boolean;
+  chatHistoryDialogQuery: string;
   announceSessionSwitch?: (sessionKey: string, label: string) => void;
   chatQueue: ChatQueueItem[];
   chatQueueBySession: Record<string, ChatQueueItem[]>;

@@ -39,6 +39,30 @@ type SessionDefaultsSnapshot = {
   mainKey?: string;
 };
 
+function isNewChatPlaceholder(label: string | undefined | null): boolean {
+  return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
+}
+
+function resolveNewChatLabel(sessions: SessionsListResult | null | undefined): string {
+  const used = new Set<number>();
+  for (const row of sessions?.sessions ?? []) {
+    const label = row.label?.trim() || row.displayName?.trim();
+    if (!isNewChatPlaceholder(label)) {
+      continue;
+    }
+    const match = /^new chat(?:\s+(\d+))?$/i.exec(label ?? "");
+    const index = match?.[1] ? Number.parseInt(match[1], 10) : 1;
+    if (Number.isInteger(index) && index > 0) {
+      used.add(index);
+    }
+  }
+  let next = 1;
+  while (used.has(next)) {
+    next += 1;
+  }
+  return next === 1 ? "New chat" : `New chat ${next}`;
+}
+
 type SessionSwitchHost = AppViewState & {
   chatStreamStartedAt: number | null;
   chatSideResultTerminalRuns: Set<string>;
@@ -711,6 +735,7 @@ export async function createChatSession(state: AppViewState): Promise<boolean> {
     state as unknown as Parameters<typeof createSessionAndRefresh>[0],
     {
       agentId: resolveAgentIdFromSessionKey(previousSessionKey),
+      label: resolveNewChatLabel(state.sessionsResult),
       parentSessionKey,
       emitCommandHooks: parentSessionKey !== undefined ? true : undefined,
     },

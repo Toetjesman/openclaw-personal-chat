@@ -25,6 +25,7 @@ import {
 } from "./app-render.helpers.ts";
 import { hasOperatorWriteAccess, warnQueryToken } from "./app-settings.ts";
 import type { AppViewState } from "./app-view-state.ts";
+import { extractTextCached } from "./chat/message-extract.ts";
 import { reconcileChatRunLifecycle } from "./chat/run-lifecycle.ts";
 import {
   controlUiNowMs,
@@ -190,6 +191,7 @@ import { renderLoginGate } from "./views/login-gate.ts";
 import { renderOverview } from "./views/overview.ts";
 
 let pendingUpdate: (() => void) | undefined;
+let sidebarSearchDebounce: number | undefined;
 
 const notifyLazyViewChanged = () => pendingUpdate?.();
 
@@ -252,8 +254,7 @@ function isSidebarSessionBusy(state: AppViewState) {
   );
 }
 
-function resolveSidebarRecentSessions(state: AppViewState): GatewaySessionRow[] {
-  const query = state.chatSidebarSessionQuery.trim().toLowerCase();
+function getSidebarSessionCandidates(state: AppViewState): GatewaySessionRow[] {
   return (state.sessionsResult?.sessions ?? [])
     .filter(
       (row) =>
@@ -265,21 +266,193 @@ function resolveSidebarRecentSessions(state: AppViewState): GatewaySessionRow[] 
         !isSubagentSessionKey(row.key) &&
         !row.spawnedBy,
     )
+    .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function rowBaseSearchText(row: GatewaySessionRow) {
+  return normalizeStringEntries([
+    row.key,
+    row.label,
+    row.displayName,
+    row.subject,
+    row.room,
+    row.space,
+    resolveSessionDisplayName(row.key, row),
+  ]).join("\n");
+}
+
+function extractHistorySearchText(messages: unknown[]) {
+  return normalizeStringEntries(messages.map((message) => extractTextCached(message) ?? ""))
+    .join("\n")
+    .slice(0, 12_000);
+}
+
+function sidebarSessionMatchesQuery(
+  state: AppViewState,
+  row: GatewaySessionRow,
+  normalizedQuery: string,
+) {
+  if (!normalizedQuery) {
+    return true;
+  }
+  const baseText = rowBaseSearchText(row).toLowerCase();
+  if (baseText.includes(normalizedQuery)) {
+    return true;
+  }
+  const indexed = state.chatSidebarSessionSearchIndex[row.key];
+  return indexed?.text.toLowerCase().includes(normalizedQuery) ?? false;
+}
+
+function sidebarSessionSearchLoading(state: AppViewState, rows: GatewaySessionRow[]) {
+  return rows.some((row) => state.chatSidebarSessionSearchIndex[row.key]?.loading);
+}
+
+function refreshSidebarSessionSearchIndex(
+  state: AppViewState,
+  rows: GatewaySessionRow[],
+  queryOverride?: string,
+) {
+  const query = (queryOverride ?? state.chatSidebarSessionAppliedQuery).trim();
+  if (!query || !state.client || !state.connected) {
+    return;
+  }
+  const pendingRows = rows
     .filter((row) => {
-      if (!query) {
-        return true;
-      }
-      const label = resolveSessionDisplayName(row.key, row).toLowerCase();
-      return label.includes(query) || row.key.toLowerCase().includes(query);
+      const indexed = state.chatSidebarSessionSearchIndex[row.key];
+      return !indexed || (!indexed.loading && indexed.updatedAt !== row.updatedAt);
     })
-    .toSorted((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .slice(0, 24);
+    .slice(0, 20);
+  for (const row of pendingRows) {
+    state.chatSidebarSessionSearchIndex = {
+      ...state.chatSidebarSessionSearchIndex,
+      [row.key]: {
+        loading: true,
+        text: state.chatSidebarSessionSearchIndex[row.key]?.text ?? "",
+        updatedAt: row.updatedAt,
+      },
+    };
+    void (async () => {
+      try {
+        const res = await state.client?.request<{ messages?: unknown[] }>("chat.history", {
+          sessionKey: row.key,
+          limit: 24,
+          maxChars: 8_000,
+        });
+        state.chatSidebarSessionSearchIndex = {
+          ...state.chatSidebarSessionSearchIndex,
+          [row.key]: {
+            loading: false,
+            text: extractHistorySearchText(Array.isArray(res?.messages) ? res.messages : []),
+            updatedAt: row.updatedAt,
+          },
+        };
+      } catch {
+        state.chatSidebarSessionSearchIndex = {
+          ...state.chatSidebarSessionSearchIndex,
+          [row.key]: {
+            loading: false,
+            text: "",
+            updatedAt: row.updatedAt,
+          },
+        };
+      } finally {
+        pendingUpdate?.();
+      }
+    })();
+  }
+}
+
+function resolveSidebarRecentSessions(state: AppViewState): GatewaySessionRow[] {
+  const normalizedQuery = normalizeSearchText(state.chatSidebarSessionAppliedQuery);
+  const candidates = getSidebarSessionCandidates(state);
+  if (normalizedQuery) {
+    refreshSidebarSessionSearchIndex(state, candidates, normalizedQuery);
+  }
+  return candidates.filter((row) => sidebarSessionMatchesQuery(state, row, normalizedQuery));
+}
+
+function resolveChatHistoryDialogSessions(state: AppViewState): GatewaySessionRow[] {
+  const normalizedQuery = normalizeSearchText(state.chatHistoryDialogQuery);
+  const candidates = getSidebarSessionCandidates(state);
+  if (normalizedQuery) {
+    refreshSidebarSessionSearchIndex(state, candidates, normalizedQuery);
+  }
+  return candidates.filter((row) => sidebarSessionMatchesQuery(state, row, normalizedQuery));
+}
+
+function canLoadMoreSidebarSessions(state: AppViewState) {
+  const result = state.sessionsResult;
+  return Boolean(
+    result?.hasMore &&
+    result.nextOffset != null &&
+    state.connected &&
+    state.client &&
+    !state.sessionsLoading,
+  );
+}
+
+async function loadMoreSidebarSessions(state: AppViewState) {
+  const nextOffset = state.sessionsResult?.nextOffset;
+  if (!canLoadMoreSidebarSessions(state) || nextOffset == null) {
+    return;
+  }
+  await loadSessions(
+    state,
+    createChatSessionsLoadOverrides(state, {
+      offset: nextOffset,
+      append: true,
+    }),
+  );
+}
+
+function scheduleSidebarSearch(state: AppViewState, value: string) {
+  state.chatSidebarSessionQuery = value;
+  if (sidebarSearchDebounce !== undefined) {
+    window.clearTimeout(sidebarSearchDebounce);
+  }
+  sidebarSearchDebounce = window.setTimeout(() => {
+    state.chatSidebarSessionAppliedQuery = state.chatSidebarSessionQuery;
+    pendingUpdate?.();
+  }, 320);
+}
+
+function renderSidebarSessionSearch(state: AppViewState) {
+  return html`
+    <label class="sidebar-session-search">
+      <span class="sidebar-session-search__icon" aria-hidden="true">${icons.search}</span>
+      <input
+        type="search"
+        placeholder=${t("chat.selectors.sessionSearch")}
+        aria-label=${t("chat.selectors.sessionSearch")}
+        .value=${state.chatSidebarSessionQuery}
+        @input=${(event: Event) => {
+          scheduleSidebarSearch(state, (event.target as HTMLInputElement).value);
+        }}
+      />
+    </label>
+  `;
+}
+
+function openChatHistoryDialog(state: AppViewState) {
+  state.chatHistoryDialogOpen = true;
+  state.requestUpdate?.();
 }
 
 function renderSidebarSessions(state: AppViewState) {
   const collapsed = state.settings.navCollapsed;
   const busy = isSidebarSessionBusy(state);
-  const recent = collapsed ? [] : resolveSidebarRecentSessions(state);
+  const chatHistory = collapsed ? [] : resolveSidebarRecentSessions(state);
+  const searchLoading =
+    !collapsed &&
+    Boolean(state.chatSidebarSessionAppliedQuery.trim()) &&
+    sidebarSessionSearchLoading(state, getSidebarSessionCandidates(state));
+  const historyCountLabel = state.sessionsResult?.hasMore
+    ? `${chatHistory.length}+`
+    : `${chatHistory.length}`;
   const newSessionDisabled = !state.connected || state.sessionsLoading || busy || !state.client;
   const newSessionTitle = !state.connected
     ? "Connect to create a new session"
@@ -311,81 +484,181 @@ function renderSidebarSessions(state: AppViewState) {
               >${t("chat.runControls.newSession")}</span
             >`}
       </button>
-      ${collapsed || recent.length === 0
-        ? collapsed
-          ? nothing
-          : html`
-              <label class="sidebar-session-search">
-                <span class="sidebar-session-search__icon" aria-hidden="true">${icons.search}</span>
-                <input
-                  type="search"
-                  placeholder=${t("chat.selectors.sessionSearch")}
-                  aria-label=${t("chat.selectors.sessionSearch")}
-                  .value=${state.chatSidebarSessionQuery}
-                  @input=${(event: Event) => {
-                    state.chatSidebarSessionQuery = (event.target as HTMLInputElement).value;
-                  }}
-                />
-              </label>
-              <div class="sidebar-recent-sessions__empty">
-                ${state.chatSidebarSessionQuery.trim()
-                  ? "No matching chats"
-                  : "No chat history yet"}
-              </div>
-            `
+      ${collapsed
+        ? nothing
         : html`
-            <div
-              class="sidebar-recent-sessions ${state.settings.recentSessionsCollapsed
-                ? "sidebar-recent-sessions--collapsed"
-                : ""}"
-              aria-label=${t("overview.cards.recentSessions")}
+            ${renderSidebarSessionSearch(state)}
+            <button
+              class="sidebar-all-chats"
+              type="button"
+              @click=${() => openChatHistoryDialog(state)}
             >
-              <label class="sidebar-session-search">
-                <span class="sidebar-session-search__icon" aria-hidden="true">${icons.search}</span>
-                <input
-                  type="search"
-                  placeholder=${t("chat.selectors.sessionSearch")}
-                  aria-label=${t("chat.selectors.sessionSearch")}
-                  .value=${state.chatSidebarSessionQuery}
-                  @input=${(event: Event) => {
-                    state.chatSidebarSessionQuery = (event.target as HTMLInputElement).value;
-                  }}
-                />
-              </label>
-              <button
-                class="sidebar-recent-sessions__label"
-                type="button"
-                aria-expanded=${String(!state.settings.recentSessionsCollapsed)}
-                @click=${() => {
-                  state.applySettings({
-                    ...state.settings,
-                    recentSessionsCollapsed: !state.settings.recentSessionsCollapsed,
-                  });
-                }}
-              >
-                <span class="sidebar-recent-sessions__label-text"
-                  >${t("usage.sessions.recentShort")}</span
-                >
-                <span class="sidebar-recent-sessions__chevron"> ${icons.chevronDown} </span>
-              </button>
-              <div class="sidebar-recent-sessions__list">
-                ${recent.map((row) => renderSidebarRecentSession(state, row))}
-              </div>
-            </div>
+              <span class="sidebar-all-chats__icon" aria-hidden="true">${icons.fileText}</span>
+              <span>Alle chats</span>
+            </button>
+            ${chatHistory.length === 0
+              ? html`
+                  <div class="sidebar-recent-sessions__empty">
+                    ${searchLoading
+                      ? "Chatgeschiedenis doorzoeken..."
+                      : state.chatSidebarSessionAppliedQuery.trim()
+                        ? "Geen chats gevonden"
+                        : "Nog geen chatgeschiedenis"}
+                  </div>
+                `
+              : html`
+                  <div
+                    class="sidebar-recent-sessions ${state.settings.recentSessionsCollapsed
+                      ? "sidebar-recent-sessions--collapsed"
+                      : ""}"
+                    aria-label="Chatgeschiedenis"
+                  >
+                    <button
+                      class="sidebar-recent-sessions__label"
+                      type="button"
+                      aria-expanded=${String(!state.settings.recentSessionsCollapsed)}
+                      @click=${() => {
+                        state.applySettings({
+                          ...state.settings,
+                          recentSessionsCollapsed: !state.settings.recentSessionsCollapsed,
+                        });
+                      }}
+                    >
+                      <span class="sidebar-recent-sessions__label-text">Chatgeschiedenis</span>
+                      <span class="sidebar-recent-sessions__count">${historyCountLabel}</span>
+                      <span class="sidebar-recent-sessions__chevron"> ${icons.chevronDown} </span>
+                    </button>
+                    <div class="sidebar-recent-sessions__list">
+                      ${chatHistory.map((row) => renderSidebarRecentSession(state, row))}
+                      ${state.chatSidebarSessionAppliedQuery.trim()
+                        ? nothing
+                        : html`
+                            <button
+                              class="sidebar-recent-sessions__load-more"
+                              type="button"
+                              ?disabled=${!canLoadMoreSidebarSessions(state)}
+                              @click=${() => void loadMoreSidebarSessions(state)}
+                            >
+                              ${state.sessionsLoading
+                                ? "Laden..."
+                                : canLoadMoreSidebarSessions(state)
+                                  ? "Meer laden"
+                                  : "Alles geladen"}
+                            </button>
+                          `}
+                    </div>
+                  </div>
+                `}
           `}
     </section>
   `;
 }
 
-function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow) {
+function renderChatHistoryDialog(state: AppViewState) {
+  if (!state.chatHistoryDialogOpen) {
+    return nothing;
+  }
+  const rows = resolveChatHistoryDialogSessions(state);
+  const query = state.chatHistoryDialogQuery.trim();
+  const searchLoading =
+    Boolean(query) && sidebarSessionSearchLoading(state, getSidebarSessionCandidates(state));
+  const close = () => {
+    state.chatHistoryDialogOpen = false;
+    state.requestUpdate?.();
+  };
+  return html`
+    <div
+      class="chat-history-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Alle chats"
+      @keydown=${(event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
+      <button class="chat-history-dialog__backdrop" type="button" @click=${close}></button>
+      <section class="chat-history-dialog__panel">
+        <header class="chat-history-dialog__header">
+          <div>
+            <h2>Alle chats</h2>
+            <p>
+              ${state.sessionsResult?.hasMore ? `${rows.length}+ geladen` : `${rows.length} chats`}
+            </p>
+          </div>
+          <button
+            class="chat-history-dialog__close"
+            type="button"
+            title=${t("common.close")}
+            aria-label=${t("common.close")}
+            @click=${close}
+          >
+            ${icons.x}
+          </button>
+        </header>
+        <label class="chat-history-dialog__search">
+          <span aria-hidden="true">${icons.search}</span>
+          <input
+            type="search"
+            placeholder="Zoek in alle chats"
+            aria-label="Zoek in alle chats"
+            .value=${state.chatHistoryDialogQuery}
+            @input=${(event: Event) => {
+              state.chatHistoryDialogQuery = (event.target as HTMLInputElement).value;
+            }}
+          />
+        </label>
+        <div class="chat-history-dialog__list">
+          ${rows.length === 0
+            ? html`
+                <div class="chat-history-dialog__empty">
+                  ${searchLoading
+                    ? "Chatgeschiedenis doorzoeken..."
+                    : query
+                      ? "Geen chats gevonden"
+                      : "Nog geen chatgeschiedenis"}
+                </div>
+              `
+            : rows.map((row) => renderChatHistoryDialogRow(state, row, close))}
+        </div>
+        <footer class="chat-history-dialog__footer">
+          ${query
+            ? html`<span>Zoeken kijkt in titels en geladen chatinhoud.</span>`
+            : html`
+                <button
+                  class="chat-history-dialog__load-more"
+                  type="button"
+                  ?disabled=${!canLoadMoreSidebarSessions(state)}
+                  @click=${() => void loadMoreSidebarSessions(state)}
+                >
+                  ${state.sessionsLoading
+                    ? "Laden..."
+                    : canLoadMoreSidebarSessions(state)
+                      ? "Meer chats laden"
+                      : "Alle chats geladen"}
+                </button>
+              `}
+        </footer>
+      </section>
+    </div>
+  `;
+}
+
+function renderChatHistoryDialogRow(
+  state: AppViewState,
+  row: GatewaySessionRow,
+  close: () => void,
+) {
   const active = row.key === state.sessionKey;
   const label = resolveSessionDisplayName(row.key, row);
-  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
+  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "Geen datum";
   const href = `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(row.key)}`;
   return html`
     <a
+      class="chat-history-dialog__row ${active ? "chat-history-dialog__row--active" : ""}"
       href=${href}
-      class="sidebar-recent-session ${active ? "sidebar-recent-session--active" : ""}"
       title=${`${label} · ${row.key}`}
       @click=${(event: MouseEvent) => {
         if (
@@ -399,24 +672,88 @@ function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow)
           return;
         }
         event.preventDefault();
+        close();
         if (row.key !== state.sessionKey) {
           switchChatSession(state, row.key);
         }
         state.setTab("chat" as import("./navigation.ts").Tab);
       }}
     >
-      <span class="sidebar-recent-session__dot" aria-hidden="true"></span>
-      <span class="sidebar-recent-session__body">
-        <span class="sidebar-recent-session__name">${label}</span>
-        <span class="sidebar-recent-session__meta">${meta}</span>
+      <span class="chat-history-dialog__row-dot" aria-hidden="true"></span>
+      <span class="chat-history-dialog__row-body">
+        <span class="chat-history-dialog__row-title">${label}</span>
+        <span class="chat-history-dialog__row-meta">${meta}</span>
       </span>
       ${row.hasActiveRun
-        ? html`<span
-            class="sidebar-recent-session__live"
-            aria-label=${t("sessions.sessionDetails.activeRun")}
-          ></span>`
+        ? html`<span class="chat-history-dialog__row-live" aria-label="Actieve run"></span>`
         : nothing}
     </a>
+  `;
+}
+
+function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow) {
+  const active = row.key === state.sessionKey;
+  const label = resolveSessionDisplayName(row.key, row);
+  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
+  const href = `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(row.key)}`;
+  return html`
+    <div class="sidebar-recent-session ${active ? "sidebar-recent-session--active" : ""}">
+      <a
+        href=${href}
+        class="sidebar-recent-session__link"
+        title=${`${label} · ${row.key}`}
+        @click=${(event: MouseEvent) => {
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          ) {
+            return;
+          }
+          event.preventDefault();
+          if (row.key !== state.sessionKey) {
+            switchChatSession(state, row.key);
+          }
+          state.setTab("chat" as import("./navigation.ts").Tab);
+        }}
+      >
+        <span class="sidebar-recent-session__dot" aria-hidden="true"></span>
+        <span class="sidebar-recent-session__body">
+          <span class="sidebar-recent-session__name">${label}</span>
+          <span class="sidebar-recent-session__meta">${meta}</span>
+        </span>
+        ${row.hasActiveRun
+          ? html`<span
+              class="sidebar-recent-session__live"
+              aria-label=${t("sessions.sessionDetails.activeRun")}
+            ></span>`
+          : nothing}
+      </a>
+      <button
+        class="sidebar-recent-session__delete"
+        type="button"
+        title=${t("common.delete")}
+        aria-label=${t("common.delete")}
+        ?disabled=${state.sessionsLoading || !state.connected || !state.client}
+        @click=${async () => {
+          const deleted = await deleteSessionsAndRefresh(
+            state as unknown as Parameters<typeof deleteSessionsAndRefresh>[0],
+            [row.key],
+          );
+          if (deleted.includes(row.key) && row.key === state.sessionKey) {
+            state.chatMessages = [];
+            state.chatToolMessages = [];
+            state.chatStream = null;
+          }
+          state.requestUpdate?.();
+        }}
+      >
+        ${icons.trash}
+      </button>
+    </div>
   `;
 }
 
@@ -3147,6 +3484,7 @@ export function renderApp(state: AppViewState) {
           : nothing}
       </main>
       ${renderExecApprovalPrompt(state)} ${renderGatewayUrlConfirmation(state)}
+      ${renderChatHistoryDialog(state)}
       ${renderDreamingRestartConfirmation({
         open: state.dreamingRestartConfirmOpen,
         loading: state.dreamingRestartConfirmLoading,

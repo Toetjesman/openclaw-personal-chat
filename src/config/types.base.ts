@@ -153,6 +153,15 @@ export type SessionResetByTypeConfig = {
   thread?: SessionResetConfig;
 };
 
+export type SessionTitleConfig = {
+  /** Enable AI auto-generated session titles. Default: true. */
+  enabled?: boolean;
+  /** Number of user turns before generating a title. Default: 3. */
+  turnsBeforeTitle?: number;
+  /** Maximum characters for the generated title. Default: 50. */
+  maxChars?: number;
+};
+
 export type SessionThreadBindingsConfig = {
   /**
    * Master switch for thread-bound session routing features.
@@ -207,6 +216,8 @@ export type SessionConfig = {
   };
   /** Shared defaults for thread-bound session routing across channels/providers. */
   threadBindings?: SessionThreadBindingsConfig;
+  /** AI auto-generated session title configuration. */
+  sessionTitle?: SessionTitleConfig;
   /** Automatic session store maintenance (pruning, capping, archive retention, disk budget). */
   maintenance?: SessionMaintenanceConfig;
 };

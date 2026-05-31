@@ -11,6 +11,7 @@ const repoRoot = path.resolve(here, "..");
 const outDir = path.resolve(here, "../dist/control-ui");
 const require = createRequire(import.meta.url);
 const json5EsmPath = require.resolve("json5/dist/index.mjs");
+const ipaddrJsPath = require.resolve("ipaddr.js");
 const commonJsOptimizeDeps = [
   "highlight.js/lib/core",
   "highlight.js/lib/languages/bash",
@@ -122,7 +123,9 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
+        "ipaddr.js": ipaddrJsPath,
         json5: json5EsmPath,
+        "@openclaw/net-policy/ip": path.resolve(repoRoot, "packages/net-policy/src/ip.ts"),
       },
     },
     build: {

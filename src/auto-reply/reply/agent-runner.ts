@@ -2365,6 +2365,118 @@ export async function runReplyAgent(params: {
     returnWithQueuedFollowupDrain(undefined);
     throw error;
   } finally {
+    // Fire-and-forget: generate an AI title when the turn threshold is reached.
+    if (sessionKey && activeSessionEntry && storePath && !isHeartbeat && !isNewSession) {
+      const titleCfg = cfg.session?.sessionTitle;
+      if (titleCfg?.enabled !== false && !activeSessionEntry.autoTitle) {
+        const turnsBefore = titleCfg?.turnsBeforeTitle ?? 3;
+        const currentTurns = activeSessionEntry.autoTitleTurnsCount ?? 0;
+        if (currentTurns >= turnsBefore) {
+          void (async () => {
+            try {
+              const { generateSessionTitle } =
+                await import("../../agents/session-title-generator.js");
+              const { readSessionTitleFieldsFromTranscriptAsync } =
+                await import("../../gateway/session-utils.fs.js");
+              const agentId = resolveSessionAgentId({
+                sessionKey,
+                config: cfg,
+              });
+              const fields = await readSessionTitleFieldsFromTranscriptAsync(
+                activeSessionEntry!.sessionId,
+                storePath,
+                activeSessionEntry!.sessionFile,
+                agentId,
+              );
+              const firstMessages: string[] = [];
+              if (fields.firstUserMessage) {
+                firstMessages.push(fields.firstUserMessage);
+              }
+              if (commandBody?.trim()) {
+                firstMessages.push(commandBody.trim());
+              }
+
+              // Resolve model: use session's active model or fall back to defaults.
+              const activeModel = cfg.agents?.defaults?.model ?? "deepseek/deepseek-chat";
+              const [provider, modelName = ""] =
+                typeof activeModel === "string"
+                  ? activeModel.split("/", 2)
+                  : ["deepseek", "deepseek-chat"];
+              const maxChars = titleCfg?.maxChars ?? 50;
+
+              // Resolve API key from environment (provider_UPPER_API_KEY pattern).
+              const keyEnvVar = `${provider.toUpperCase()}_API_KEY`;
+              const apiKey = process.env[keyEnvVar];
+              if (!apiKey) {
+                logVerbose(`[session-title] No API key for provider "${provider}" (${keyEnvVar})`);
+                return;
+              }
+
+              // Resolve base URL for known providers.
+              const baseUrls: Record<string, string> = {
+                deepseek: "https://api.deepseek.com/v1",
+                openai: "https://api.openai.com/v1",
+                anthropic: "https://api.anthropic.com/v1",
+                google: "https://generativelanguage.googleapis.com/v1beta",
+                groq: "https://api.groq.com/openai/v1",
+              };
+              const baseUrl = baseUrls[provider.toLowerCase()] ?? "https://api.deepseek.com/v1";
+
+              await generateSessionTitle({
+                firstMessages,
+                sessionEntry: activeSessionEntry!,
+                sessionKey: sessionKey!,
+                cfg,
+                persistEntry: async (_sk, patch) => {
+                  await applySessionStoreEntryPatch({
+                    storePath: storePath!,
+                    sessionKey: sessionKey!,
+                    skipMaintenance: true,
+                    takeCacheOwnership: true,
+                    patch: { ...patch, updatedAt: Date.now() },
+                  });
+                },
+                callModel: async (prompt) => {
+                  const resp = await fetch(`${baseUrl}/chat/completions`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                      model: modelName,
+                      messages: [
+                        {
+                          role: "user",
+                          content: prompt,
+                        },
+                      ],
+                      max_tokens: Math.min(maxChars * 4, 200),
+                      temperature: 0.3,
+                    }),
+                  });
+                  if (!resp.ok) {
+                    logVerbose(
+                      `[session-title] API error ${resp.status}: ${await resp.text().catch(() => "")}`,
+                    );
+                    return undefined;
+                  }
+                  const json = (await resp.json()) as {
+                    choices?: Array<{
+                      message?: { content?: string };
+                    }>;
+                  };
+                  return json.choices?.[0]?.message?.content?.trim() || undefined;
+                },
+              });
+            } catch (err) {
+              logVerbose(`[session-title] failed for ${sessionKey}: ${String(err)}`);
+            }
+          })();
+        }
+      }
+    }
+
     try {
       await clearRestartRecoveryDeliveryContext();
     } catch (error) {

@@ -411,6 +411,12 @@ export type SessionEntry = {
   claudeCliSessionId?: string;
   label?: string;
   displayName?: string;
+  /** AI-generated short session title (replaces truncated first-message fallback). */
+  autoTitle?: string;
+  /** Timestamp (ms) when autoTitle was generated. */
+  autoTitleGeneratedAt?: number;
+  /** Number of user turns accumulated toward the auto-title threshold. */
+  autoTitleTurnsCount?: number;
   channel?: string;
   groupId?: string;
   subject?: string;

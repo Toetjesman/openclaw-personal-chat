@@ -83,6 +83,8 @@ export function resolveSessionDisplayName(
 ): string {
   const label = normalizeOptionalString(row?.label) ?? "";
   const displayName = normalizeOptionalString(row?.displayName) ?? "";
+  const autoTitle = normalizeOptionalString(row?.autoTitle) ?? "";
+  const derivedTitle = normalizeOptionalString(row?.derivedTitle) ?? "";
   const { prefix, fallbackName } = parseSessionKey(key);
 
   const applyTypedPrefix = (name: string): string => {
@@ -93,6 +95,14 @@ export function resolveSessionDisplayName(
     return prefixPattern.test(name) ? name : `${prefix} ${name}`;
   };
 
+  // AI-generated auto-title takes highest priority.
+  if (autoTitle && autoTitle !== key) {
+    return applyTypedPrefix(autoTitle);
+  }
+  // Derived title (from first message or displayName/subject) next.
+  if (derivedTitle && derivedTitle !== key) {
+    return applyTypedPrefix(derivedTitle);
+  }
   if (label && label !== key) {
     return applyTypedPrefix(label);
   }

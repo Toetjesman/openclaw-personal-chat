@@ -803,6 +803,14 @@ export async function initSessionState(params: {
     // snapshot through /new; the next turn must rebuild the visible skill list.
     sessionEntry.skillsSnapshot = undefined;
   }
+  // Auto-title: increment user-turn counter for non-system messages.
+  if (!isSystemEvent && !isNewSession) {
+    sessionEntry.autoTitleTurnsCount = (sessionEntry.autoTitleTurnsCount ?? 0) + 1;
+  } else if (isNewSession) {
+    // Reset turn counter on new sessions so the threshold starts fresh.
+    sessionEntry.autoTitleTurnsCount = undefined;
+  }
+
   // Preserve per-session overrides while resetting compaction state on /new.
   sessionStore[sessionKey] = { ...sessionStore[sessionKey], ...sessionEntry };
   await updateSessionStore(

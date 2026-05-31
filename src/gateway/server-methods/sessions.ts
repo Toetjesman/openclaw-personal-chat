@@ -38,6 +38,7 @@ import {
   waitForEmbeddedAgentRunEnd,
 } from "../../agents/embedded-agent-runner/runs.js";
 import { compactEmbeddedAgentSession } from "../../agents/embedded-agent.js";
+import { generateConversationLabel } from "../../auto-reply/reply/conversation-label-generator.js";
 import { clearSessionQueues } from "../../auto-reply/reply/queue/cleanup.js";
 import { normalizeReasoningLevel, normalizeThinkLevel } from "../../auto-reply/thinking.js";
 import {
@@ -249,6 +250,97 @@ function requireSessionKey(key: unknown, respond: RespondFn): string | null {
     return null;
   }
   return normalized;
+}
+
+function isNewChatPlaceholderLabel(label: string | undefined | null): boolean {
+  return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
+}
+
+function sanitizeGeneratedSessionTitle(value: string | null | undefined): string | null {
+  const cleaned = normalizeOptionalString(
+    value
+      ?.replace(/^["'`]+|["'`.]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
+  if (!cleaned || cleaned.length < 3) {
+    return null;
+  }
+  return cleaned.slice(0, 80);
+}
+
+function readSessionTitleInput(params: unknown): {
+  key: unknown;
+  agentId?: string;
+  message?: string;
+  force?: boolean;
+} {
+  const record = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
+  return {
+    key: record.key ?? record.sessionKey,
+    agentId: normalizeOptionalString(record.agentId),
+    message: normalizeOptionalString(record.message),
+    force: record.force === true,
+  };
+}
+
+function extractTitleContextText(message: unknown): string | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const record = message as Record<string, unknown>;
+  const role = normalizeOptionalLowercaseString(record.role);
+  if (role && role !== "user" && role !== "assistant") {
+    return null;
+  }
+  const content = record.content;
+  if (typeof content === "string") {
+    return normalizeOptionalString(content) ?? null;
+  }
+  if (!Array.isArray(content)) {
+    return null;
+  }
+  const text = content
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return "";
+      }
+      const typed = block as Record<string, unknown>;
+      return typed.type === "text" && typeof typed.text === "string" ? typed.text : "";
+    })
+    .join(" ");
+  return normalizeOptionalString(text) ?? null;
+}
+
+async function readSessionTitleContext(params: {
+  entry: SessionEntry | undefined;
+  storePath: string | undefined;
+  message?: string;
+}): Promise<string> {
+  const parts: string[] = [];
+  const message = normalizeOptionalString(params.message);
+  if (message) {
+    parts.push(`Nieuw bericht: ${message}`);
+  }
+  if (params.entry?.sessionId) {
+    const { messages } = await readRecentSessionMessagesWithStatsAsync(
+      params.entry.sessionId,
+      params.storePath,
+      params.entry.sessionFile,
+      {
+        maxMessages: 8,
+        maxLines: 180,
+      },
+    );
+    for (const item of messages) {
+      const text = extractTitleContextText(item);
+      if (text) {
+        const role = normalizeOptionalLowercaseString((item as Record<string, unknown>).role);
+        parts.push(`${role === "assistant" ? "Assistent" : "Gebruiker"}: ${text}`);
+      }
+    }
+  }
+  return parts.join("\n").slice(0, 6_000);
 }
 
 function rejectPluginRuntimeDeleteMismatch(params: {
@@ -2257,6 +2349,121 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         reason: "abort",
       });
     }
+  },
+  "sessions.title": async ({ params, respond, context, client, isWebchatConnect }) => {
+    const p = readSessionTitleInput(params);
+    const key = requireSessionKey(p.key, respond);
+    if (!key) {
+      return;
+    }
+    if (rejectWebchatSessionMutation({ action: "patch", client, isWebchatConnect, respond })) {
+      return;
+    }
+
+    const cfg = context.getRuntimeConfig();
+    const requestedAgentId = normalizeOptionalString(p.agentId);
+    const { target, storePath } = resolveGatewaySessionTargetFromKey(key, cfg);
+    const store = loadSessionStore(storePath);
+    const entry = resolveFreshestSessionEntryFromStoreKeys(store, target.storeKeys);
+    const currentLabel = normalizeOptionalString(entry?.label);
+    if (!p.force && currentLabel && !isNewChatPlaceholderLabel(currentLabel)) {
+      respond(true, {
+        ok: true,
+        key: target.canonicalKey ?? key,
+        label: currentLabel,
+        updated: false,
+        reason: "existing-title",
+      });
+      return;
+    }
+
+    const titleContext = await readSessionTitleContext({
+      entry,
+      storePath,
+      message: p.message,
+    });
+    if (!titleContext) {
+      respond(true, {
+        ok: true,
+        key: target.canonicalKey ?? key,
+        updated: false,
+        reason: "no-context",
+      });
+      return;
+    }
+
+    const agentId = normalizeAgentId(
+      requestedAgentId ?? target.agentId ?? resolveDefaultAgentId(cfg),
+    );
+    const generated = sanitizeGeneratedSessionTitle(
+      await generateConversationLabel({
+        cfg,
+        agentId,
+        agentDir: resolveAgentWorkspaceDir(cfg, agentId),
+        userMessage: titleContext,
+        maxLength: 80,
+        prompt:
+          "Maak een korte, vriendelijke chat-titel op basis van deze conversatie. " +
+          "Gebruik dezelfde taal als de gebruiker. Geef alleen de titel terug, zonder aanhalingstekens, " +
+          "zonder punt aan het eind en maximaal 7 woorden.",
+      }),
+    );
+    if (!generated) {
+      respond(true, {
+        ok: true,
+        key: target.canonicalKey ?? key,
+        updated: false,
+        reason: "generation-failed",
+      });
+      return;
+    }
+
+    const patch = {
+      key,
+      label: generated,
+      ...(requestedAgentId ? { agentId: requestedAgentId } : {}),
+    };
+    const applied = await updateSessionStore(storePath, async (nextStore) => {
+      const { primaryKey } = migrateAndPruneGatewaySessionStoreKey({
+        cfg,
+        key,
+        store: nextStore,
+        agentId: requestedAgentId,
+      });
+      return await applySessionsPatchToStore({
+        cfg,
+        store: nextStore,
+        storeKey: primaryKey,
+        agentId: requestedAgentId,
+        patch,
+        loadGatewayModelCatalog: context.loadGatewayModelCatalog,
+      });
+    });
+    if (!applied.ok) {
+      respond(false, undefined, applied.error);
+      return;
+    }
+
+    triggerSessionPatchHook({
+      cfg,
+      sessionEntry: applied.entry,
+      sessionKey: target.canonicalKey ?? key,
+      patch,
+    });
+    respond(true, {
+      ok: true,
+      key: target.canonicalKey ?? key,
+      label: generated,
+      updated: true,
+      entry: applied.entry,
+    });
+    emitSessionsChanged(context, {
+      sessionKey: target.canonicalKey ?? key,
+      ...(target.canonicalKey === "global" && requestedAgentId
+        ? { agentId: requestedAgentId }
+        : {}),
+      reason: "patch",
+    });
   },
   "sessions.patch": async ({ params, respond, context, client, isWebchatConnect }) => {
     if (!assertValidParams(params, validateSessionsPatchParams, "sessions.patch", respond)) {

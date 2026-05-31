@@ -205,6 +205,65 @@ function isBtwCommand(text: string) {
   return /^\/(?:btw|side)(?::|\s|$)/i.test(text.trim());
 }
 
+function isNewChatPlaceholder(label: string | undefined | null): boolean {
+  return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
+}
+
+function sessionAlreadyHasFriendlyTitle(row: SessionsListResult["sessions"][number] | undefined) {
+  const label = row?.label?.trim();
+  if (label && !isNewChatPlaceholder(label)) {
+    return true;
+  }
+  return Boolean(row?.subject?.trim());
+}
+
+function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
+  const normalized = normalizeLowercaseStringOrEmpty(sessionKey);
+  if (
+    !normalized ||
+    normalized === "main" ||
+    normalized === "global" ||
+    normalized === "agent:main:main"
+  ) {
+    return false;
+  }
+  const row = host.sessionsResult?.sessions.find((session) => session.key === sessionKey);
+  return !sessionAlreadyHasFriendlyTitle(row);
+}
+
+async function maybeAutoTitleChatSession(host: ChatHost, sessionKey: string, message: string) {
+  if (!host.client || !host.connected || !shouldAutoTitleSession(host, sessionKey)) {
+    return;
+  }
+  if (!normalizeOptionalString(message) || message.trim().startsWith("/")) {
+    return;
+  }
+  try {
+    const payload = (await host.client.request("sessions.title", {
+      key: sessionKey,
+      message,
+    })) as { label?: string | null; updated?: boolean };
+    const title = normalizeOptionalString(payload?.label);
+    if (!title) {
+      return;
+    }
+    if (host.sessionsResult?.sessions) {
+      host.sessionsResult = {
+        ...host.sessionsResult,
+        sessions: host.sessionsResult.sessions.map((row) =>
+          row.key === sessionKey ? { ...row, label: title } : row,
+        ),
+      };
+      host.requestUpdate?.();
+    }
+    void loadSessions(host as unknown as SessionsState, {
+      ...createChatSessionsLoadOverrides(host),
+    });
+  } catch {
+    // Title generation is a UI convenience; never block message delivery on it.
+  }
+}
+
 function isGlobalSessionKey(sessionKey: string | undefined | null): boolean {
   return normalizeLowercaseStringOrEmpty(sessionKey) === "global";
 }
@@ -1134,10 +1193,12 @@ export async function handleSendChat(
       if (messageOverride == null) {
         recordNonTranscriptInputHistory(host, message);
       }
+      void maybeAutoTitleChatSession(host, submittedSessionKey, message);
       enqueueChatMessage(host, message, attachmentsToSend, refreshSessions);
       return;
     }
 
+    void maybeAutoTitleChatSession(host, submittedSessionKey, message);
     await sendChatMessageNow(host, message, {
       previousDraft: cleared.previousDraft,
       restoreDraft: Boolean(messageOverride && opts?.restoreDraft),

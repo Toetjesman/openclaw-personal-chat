@@ -256,17 +256,65 @@ function isNewChatPlaceholderLabel(label: string | undefined | null): boolean {
   return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
 }
 
+function extractGeneratedTitleJson(value: string): string | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    for (const field of ["title", "label", "name"]) {
+      const title = normalizeOptionalString(record[field]);
+      if (title) {
+        return title;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function sanitizeGeneratedSessionTitle(value: string | null | undefined): string | null {
-  const cleaned = normalizeOptionalString(
-    value
-      ?.replace(/^["'`]+|["'`.]+$/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
+  const raw = normalizeOptionalString(value);
+  if (!raw) {
+    return null;
+  }
+  const jsonTitle = extractGeneratedTitleJson(raw);
+  let cleaned = normalizeOptionalString(jsonTitle ?? raw) ?? "";
+  cleaned = cleaned
+    .replace(/```(?:json|text)?/gi, "")
+    .replace(/```/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[-*•]\s+/, "").trim())
+    .find((line) => line && !/^(sure|ok(?:ay)?|here(?:'|’)s|here is)\b/i.test(line))
+    ?? cleaned;
+  cleaned = cleaned
+    .replace(/^\s*(?:suggested\s+)?(?:chat\s+)?title\s*[:\-–—]\s*/i, "")
+    .replace(
+      /^\s*here(?:'|’)s\s+(?:a\s+)?(?:new\s+)?(?:chat\s+)?title(?:\s+i\s+(?:suggest|propose|recommend))?\s*[:\-–—]\s*/i,
+      "",
+    )
+    .replace(
+      /^\s*here\s+is\s+(?:a\s+)?(?:new\s+)?(?:chat\s+)?title(?:\s+i\s+(?:suggest|propose|recommend))?\s*[:\-–—]\s*/i,
+      "",
+    )
+    .replace(/^\s*i\s+(?:suggest|propose|recommend)\s*[:\-–—]\s*/i, "")
+    .replace(/^\s*["'`“”‘’]+|["'`“”‘’.\s]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const angleTitle = cleaned.match(/^<([^<>]{3,80})>$/)?.[1]?.trim();
+  if (angleTitle) {
+    cleaned = angleTitle;
+  }
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length > 7) {
+    cleaned = words.slice(0, 7).join(" ");
+  }
   if (!cleaned || cleaned.length < 3) {
     return null;
   }
-  return cleaned.slice(0, 80);
+  return cleaned.slice(0, 80).replace(/[.!?]+$/g, "");
 }
 
 function readSessionTitleInput(params: unknown): {
@@ -2403,9 +2451,11 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         userMessage: titleContext,
         maxLength: 80,
         prompt:
-          "Maak een korte, vriendelijke chat-titel op basis van deze conversatie. " +
-          "Gebruik dezelfde taal als de gebruiker. Geef alleen de titel terug, zonder aanhalingstekens, " +
-          "zonder punt aan het eind en maximaal 7 woorden.",
+          "You generate compact chat titles for a ChatGPT-like sidebar. " +
+          "Return exactly one title and nothing else. Do not explain, do not mention that you suggest a title, " +
+          "do not use labels like 'Title:', do not use quotes, and do not use markdown. " +
+          "Use the same language as the user's latest message. Keep it specific, friendly, and at most 7 words. " +
+          "Bad output: \"Here's a new title I suggest: API Setup Help\". Good output: \"API Setup Help\".",
       }),
     );
     if (!generated) {

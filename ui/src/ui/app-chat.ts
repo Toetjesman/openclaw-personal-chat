@@ -211,10 +211,7 @@ function isNewChatPlaceholder(label: string | undefined | null): boolean {
 
 function sessionAlreadyHasFriendlyTitle(row: SessionsListResult["sessions"][number] | undefined) {
   const label = row?.label?.trim();
-  if (label && !isNewChatPlaceholder(label)) {
-    return true;
-  }
-  return Boolean(row?.subject?.trim());
+  return Boolean(label && !isNewChatPlaceholder(label));
 }
 
 function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
@@ -228,7 +225,7 @@ function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
     return false;
   }
   const row = host.sessionsResult?.sessions.find((session) => session.key === sessionKey);
-  return !sessionAlreadyHasFriendlyTitle(row);
+  return Boolean(row) && !sessionAlreadyHasFriendlyTitle(row);
 }
 
 async function maybeAutoTitleChatSession(host: ChatHost, sessionKey: string, message: string) {

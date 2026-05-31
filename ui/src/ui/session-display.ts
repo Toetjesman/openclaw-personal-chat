@@ -95,16 +95,17 @@ export function resolveSessionDisplayName(
     return prefixPattern.test(name) ? name : `${prefix} ${name}`;
   };
 
-  // AI-generated auto-title takes highest priority.
+  // Explicit labels come from rename actions and the personal chat auto-title RPC.
+  if (label && label !== key) {
+    return applyTypedPrefix(label);
+  }
+  // AI-generated auto-title from older metadata is still useful when no label exists.
   if (autoTitle && autoTitle !== key) {
     return applyTypedPrefix(autoTitle);
   }
   // Derived title (from first message or displayName/subject) next.
   if (derivedTitle && derivedTitle !== key) {
     return applyTypedPrefix(derivedTitle);
-  }
-  if (label && label !== key) {
-    return applyTypedPrefix(label);
   }
   if (displayName && displayName !== key) {
     return applyTypedPrefix(displayName);

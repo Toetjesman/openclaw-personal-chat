@@ -282,13 +282,13 @@ function sanitizeGeneratedSessionTitle(value: string | null | undefined): string
   }
   const jsonTitle = extractGeneratedTitleJson(raw);
   let cleaned = normalizeOptionalString(jsonTitle ?? raw) ?? "";
-  cleaned = cleaned
-    .replace(/```(?:json|text)?/gi, "")
-    .replace(/```/g, "")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\s*[-*•]\s+/, "").trim())
-    .find((line) => line && !/^(sure|ok(?:ay)?|here(?:'|’)s|here is)\b/i.test(line))
-    ?? cleaned;
+  cleaned =
+    cleaned
+      .replace(/```(?:json|text)?/gi, "")
+      .replace(/```/g, "")
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*[-*•]\s+/, "").trim())
+      .find((line) => line && !/^(sure|ok(?:ay)?|here(?:'|’)s|here is)\b/i.test(line)) ?? cleaned;
   cleaned = cleaned
     .replace(/^\s*(?:suggested\s+)?(?:chat\s+)?title\s*[:\-–—]\s*/i, "")
     .replace(
@@ -315,6 +315,30 @@ function sanitizeGeneratedSessionTitle(value: string | null | undefined): string
     return null;
   }
   return cleaned.slice(0, 80).replace(/[.!?]+$/g, "");
+}
+
+function fallbackGeneratedSessionTitle(value: string | null | undefined): string | null {
+  const raw = normalizeOptionalString(value);
+  if (!raw) {
+    return null;
+  }
+  const preferredLine =
+    raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => /^Nieuw bericht:/i.test(line)) ?? raw;
+  const cleaned = preferredLine
+    .replace(/^\s*(?:Nieuw bericht|Gebruiker|Assistent|User|Assistant)\s*:\s*/i, "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[`*_#[\]()>~|{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned || cleaned.length < 3) {
+    return null;
+  }
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  return sanitizeGeneratedSessionTitle(words.slice(0, 7).join(" "));
 }
 
 function readSessionTitleInput(params: unknown): {
@@ -2443,21 +2467,22 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const agentId = normalizeAgentId(
       requestedAgentId ?? target.agentId ?? resolveDefaultAgentId(cfg),
     );
-    const generated = sanitizeGeneratedSessionTitle(
-      await generateConversationLabel({
-        cfg,
-        agentId,
-        agentDir: resolveAgentWorkspaceDir(cfg, agentId),
-        userMessage: titleContext,
-        maxLength: 80,
-        prompt:
-          "You generate compact chat titles for a ChatGPT-like sidebar. " +
-          "Return exactly one title and nothing else. Do not explain, do not mention that you suggest a title, " +
-          "do not use labels like 'Title:', do not use quotes, and do not use markdown. " +
-          "Use the same language as the user's latest message. Keep it specific, friendly, and at most 7 words. " +
-          "Bad output: \"Here's a new title I suggest: API Setup Help\". Good output: \"API Setup Help\".",
-      }),
-    );
+    const generated =
+      sanitizeGeneratedSessionTitle(
+        await generateConversationLabel({
+          cfg,
+          agentId,
+          agentDir: resolveAgentWorkspaceDir(cfg, agentId),
+          userMessage: titleContext,
+          maxLength: 80,
+          prompt:
+            "You generate compact chat titles for a ChatGPT-like sidebar. " +
+            "Return exactly one title and nothing else. Do not explain, do not mention that you suggest a title, " +
+            "do not use labels like 'Title:', do not use quotes, and do not use markdown. " +
+            "Use the same language as the user's latest message. Keep it specific, friendly, and at most 7 words. " +
+            'Bad output: "Here\'s a new title I suggest: API Setup Help". Good output: "API Setup Help".',
+        }),
+      ) ?? fallbackGeneratedSessionTitle(titleContext);
     if (!generated) {
       respond(true, {
         ok: true,

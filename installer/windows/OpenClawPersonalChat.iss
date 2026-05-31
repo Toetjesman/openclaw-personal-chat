@@ -2,7 +2,7 @@
 #define MyAppPublisher "OpenClaw"
 #define MyAppExeName "OpenClawChat.cmd"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1.5"
+#define MyAppVersion "0.1.6"
 #endif
 #ifndef SourceRoot
 #define SourceRoot "..\..\"

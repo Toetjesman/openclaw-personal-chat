@@ -267,6 +267,17 @@ function isAssistantLikeGeneratedTitle(label: string | undefined | null): boolea
   );
 }
 
+function isPromptLikeGeneratedTitle(label: string | undefined | null): boolean {
+  const normalized = normalizeOptionalLowercaseString(label) ?? "";
+  return (
+    /^natuurlijk[!.]?\s+/.test(normalized) ||
+    /^(hi|hoi|hallo|hey)\s+(kan|kun|wil|zou)\b/.test(normalized) ||
+    /^(kan|kun|wil|zou)\s+(je|jij|u)\b/.test(normalized) ||
+    /^(can|could|would|will|please)\s+(you|u)\b/.test(normalized) ||
+    /\?$/.test(label?.trim() ?? "")
+  );
+}
+
 function extractGeneratedTitleJson(value: string): string | null {
   const candidates = [value];
   const objectMatch = value.match(/\{[\s\S]*\}/);
@@ -370,6 +381,7 @@ function extractUserTitleContextMessages(value: string): string[] {
   return value
     .split(/\r?\n/)
     .map((line) => line.trim())
+    .filter((line) => /^(?:Nieuw bericht|Gebruiker|User)\s*:/i.test(line))
     .map((line) => line.replace(/^\s*(?:Nieuw bericht|Gebruiker|User)\s*:\s*/i, "").trim())
     .filter((line) => line.length > 0);
 }
@@ -422,6 +434,88 @@ function sanitizeAiGeneratedSessionTitle(params: {
     return null;
   }
   return title;
+}
+
+function titleCaseSessionWord(word: string): string {
+  if (/^[A-Z0-9]{2,}$/.test(word)) {
+    return word;
+  }
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+function fallbackIntentSessionTitle(titleContext: string): string | null {
+  const latestUserMessage = extractUserTitleContextMessages(titleContext).at(0);
+  const raw = normalizeOptionalString(latestUserMessage);
+  if (!raw) {
+    return null;
+  }
+  const normalized = raw.toLowerCase();
+  if (/\b(ms\s*)?planner\b/.test(normalized)) {
+    return "MS Planner Overzicht";
+  }
+  if (/\b(outlook|mail|email|e-mail|inbox)\b/.test(normalized)) {
+    return "E-mail Overzicht";
+  }
+  if (/\b(github|release|installer|setup|exe)\b/.test(normalized)) {
+    return /\bgithub\b/.test(normalized) ? "GitHub Release" : "Release Installer";
+  }
+  if (/\b(titel|title|summari[sz]e|samenvat|summary)\b/.test(normalized)) {
+    return "Chat Titel Samenvatting";
+  }
+
+  const words = raw
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+  const stopWords = new Set([
+    "hi",
+    "hoi",
+    "hallo",
+    "hey",
+    "kan",
+    "kun",
+    "kunt",
+    "wil",
+    "zou",
+    "please",
+    "can",
+    "could",
+    "would",
+    "will",
+    "je",
+    "jij",
+    "u",
+    "you",
+    "naar",
+    "even",
+    "eens",
+    "onze",
+    "mijn",
+    "the",
+    "een",
+    "de",
+    "het",
+    "and",
+    "en",
+    "toe",
+    "kijken",
+    "wat",
+    "er",
+    "open",
+    "staat",
+    "maken",
+    "doen",
+  ]);
+  const keywords = words
+    .filter((word) => !stopWords.has(word.toLowerCase()))
+    .slice(0, 4)
+    .map(titleCaseSessionWord);
+  if (keywords.length < 2) {
+    return null;
+  }
+  return keywords.join(" ").slice(0, 80);
 }
 
 function fallbackGeneratedSessionTitle(value: string | null | undefined): string | null {
@@ -2567,11 +2661,18 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const store = loadSessionStore(storePath);
     const entry = resolveFreshestSessionEntryFromStoreKeys(store, target.storeKeys);
     const currentLabel = normalizeOptionalString(entry?.label);
+    const titleContext = await readSessionTitleContext({
+      entry,
+      storePath,
+      message: p.message,
+    });
     if (
       !p.force &&
       currentLabel &&
       !isNewChatPlaceholderLabel(currentLabel) &&
-      !isAssistantLikeGeneratedTitle(currentLabel)
+      !isAssistantLikeGeneratedTitle(currentLabel) &&
+      !isPromptLikeGeneratedTitle(currentLabel) &&
+      !titleCopiesUserMessage(currentLabel, extractUserTitleContextMessages(titleContext))
     ) {
       respond(true, {
         ok: true,
@@ -2583,11 +2684,6 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const titleContext = await readSessionTitleContext({
-      entry,
-      storePath,
-      message: p.message,
-    });
     if (!titleContext) {
       respond(true, {
         ok: true,
@@ -2640,7 +2736,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
             '"The title just copies my sentence" -> {"title":"Titel Samenvatting Fix"}; ' +
             '"Maak een installer voor release" -> {"title":"Release Installer"}.',
         }),
-      });
+      }) ??
+      fallbackIntentSessionTitle(titleContext);
     if (!generated) {
       respond(true, {
         ok: true,

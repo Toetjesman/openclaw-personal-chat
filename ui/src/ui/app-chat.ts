@@ -220,9 +220,24 @@ function isAssistantLikeGeneratedTitle(label: string | undefined | null): boolea
   );
 }
 
+function isPromptLikeGeneratedTitle(label: string | undefined | null): boolean {
+  const normalized = normalizeLowercaseStringOrEmpty(label);
+  return (
+    /^(hi|hoi|hallo|hey)\s+(kan|kun|wil|zou)\b/.test(normalized) ||
+    /^(kan|kun|wil|zou)\s+(je|jij|u)\b/.test(normalized) ||
+    /^(can|could|would|will|please)\s+(you|u)\b/.test(normalized) ||
+    /\?$/.test(label?.trim() ?? "")
+  );
+}
+
 function sessionAlreadyHasFriendlyTitle(row: SessionsListResult["sessions"][number] | undefined) {
   const label = row?.label?.trim();
-  return Boolean(label && !isNewChatPlaceholder(label) && !isAssistantLikeGeneratedTitle(label));
+  return Boolean(
+    label &&
+      !isNewChatPlaceholder(label) &&
+      !isAssistantLikeGeneratedTitle(label) &&
+      !isPromptLikeGeneratedTitle(label),
+  );
 }
 
 function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
@@ -256,6 +271,9 @@ export async function maybeAutoTitleChatSession(
       key: sessionKey,
       ...(normalizedMessage ? { message: normalizedMessage } : {}),
       ...(isAssistantLikeGeneratedTitle(
+        host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
+      ) ||
+      isPromptLikeGeneratedTitle(
         host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
       )
         ? { force: true }
@@ -662,7 +680,7 @@ async function sendQueuedChatMessage(
           },
         );
         void loadChatHistory(host as unknown as ChatState);
-        void maybeAutoTitleChatSession(host, sessionKey);
+        void maybeAutoTitleChatSession(host, sessionKey, message);
       } else {
         host.chatRunId = ack.runId;
         host.chatStream = "";

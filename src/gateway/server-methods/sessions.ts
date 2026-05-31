@@ -299,7 +299,8 @@ function cleanGeneratedSessionTitleCandidate(value: string | null | undefined): 
     return null;
   }
   let cleaned = raw;
-  cleaned = cleaned
+  cleaned =
+    cleaned
       .replace(/```(?:json|text)?/gi, "")
       .replace(/```/g, "")
       .split(/\r?\n/)
@@ -369,9 +370,7 @@ function extractUserTitleContextMessages(value: string): string[] {
   return value
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .map((line) =>
-      line.replace(/^\s*(?:Nieuw bericht|Gebruiker|User)\s*:\s*/i, "").trim(),
-    )
+    .map((line) => line.replace(/^\s*(?:Nieuw bericht|Gebruiker|User)\s*:\s*/i, "").trim())
     .filter((line) => line.length > 0);
 }
 
@@ -386,7 +385,7 @@ function normalizeTitleComparisonWords(value: string): string[] {
 
 function titleCopiesUserMessage(title: string, userMessages: string[]): boolean {
   const titleWords = normalizeTitleComparisonWords(title);
-  if (titleWords.length < 5) {
+  if (titleWords.length < 3) {
     return false;
   }
   for (const message of userMessages) {
@@ -396,6 +395,9 @@ function titleCopiesUserMessage(title: string, userMessages: string[]): boolean 
     }
     const prefix = messageWords.slice(0, titleWords.length);
     const samePrefixWords = titleWords.filter((word, index) => prefix[index] === word).length;
+    if (samePrefixWords === titleWords.length) {
+      return true;
+    }
     if (samePrefixWords / titleWords.length >= 0.8) {
       return true;
     }
@@ -2599,14 +2601,17 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const agentId = normalizeAgentId(
       requestedAgentId ?? target.agentId ?? resolveDefaultAgentId(cfg),
     );
-    const generated = sanitizeAiGeneratedSessionTitle({
+    const titleGenerationBase = {
+      cfg,
+      agentId,
+      agentDir: resolveAgentWorkspaceDir(cfg, agentId),
+      userMessage: titleContext,
+      maxLength: 80,
+    };
+    const firstGenerated = sanitizeAiGeneratedSessionTitle({
       titleContext,
       value: await generateConversationLabel({
-        cfg,
-        agentId,
-        agentDir: resolveAgentWorkspaceDir(cfg, agentId),
-        userMessage: titleContext,
-        maxLength: 80,
+        ...titleGenerationBase,
         prompt:
           'Return only minified JSON in this exact shape: {"title":"..."} ' +
           "You are naming a private ChatGPT-style conversation for a sidebar. " +
@@ -2619,6 +2624,23 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           'Bad: {"title":"Here is a title I suggest: API Setup Help"}. Good: {"title":"API Setup Help"}.',
       }),
     });
+    const generated =
+      firstGenerated ??
+      sanitizeAiGeneratedSessionTitle({
+        titleContext,
+        value: await generateConversationLabel({
+          ...titleGenerationBase,
+          prompt:
+            'Return only minified JSON in this exact shape: {"title":"..."} ' +
+            "Create a sidebar title from the user's intent, not from the user's wording. " +
+            "If the user writes a full sentence, replace it with a compact noun phrase. " +
+            "Forbidden: copying the first words of the user message, adding commentary, or using assistant/tool text. " +
+            "Allowed: 2-5 words that name the task/topic. Use the user's language. " +
+            'Examples: "Kan je mijn planning maken voor morgen?" -> {"title":"Planning Morgen"}; ' +
+            '"The title just copies my sentence" -> {"title":"Titel Samenvatting Fix"}; ' +
+            '"Maak een installer voor release" -> {"title":"Release Installer"}.',
+        }),
+      });
     if (!generated) {
       respond(true, {
         ok: true,

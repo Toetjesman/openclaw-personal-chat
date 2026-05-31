@@ -83,8 +83,6 @@ export function resolveSessionDisplayName(
 ): string {
   const label = normalizeOptionalString(row?.label) ?? "";
   const displayName = normalizeOptionalString(row?.displayName) ?? "";
-  const autoTitle = normalizeOptionalString(row?.autoTitle) ?? "";
-  const derivedTitle = normalizeOptionalString(row?.derivedTitle) ?? "";
   const { prefix, fallbackName } = parseSessionKey(key);
 
   const applyTypedPrefix = (name: string): string => {
@@ -99,15 +97,8 @@ export function resolveSessionDisplayName(
   if (label && label !== key) {
     return applyTypedPrefix(label);
   }
-  // Derived title (from first message or displayName/subject) next.
-  if (derivedTitle && derivedTitle !== key) {
-    return applyTypedPrefix(derivedTitle);
-  }
   if (displayName && displayName !== key) {
     return applyTypedPrefix(displayName);
-  }
-  if (autoTitle && autoTitle !== key) {
-    return applyTypedPrefix(autoTitle);
   }
   return fallbackName;
 }

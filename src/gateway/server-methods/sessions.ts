@@ -320,7 +320,9 @@ function cleanGeneratedSessionTitleCandidate(value: string | null | undefined): 
     /\b(?:here(?:'|â€™)?s|here\s+is|i\s+(?:suggest|propose|recommend)|suggested|recommended)\b/i.test(
       cleaned,
     ) ||
-    /\btitle\s+i\s+(?:suggest|propose|recommend)\b/i.test(cleaned)
+    /\btitle\s+i\s+(?:suggest|propose|recommend)\b/i.test(cleaned) ||
+    /\b(?:hier\s+is|hier\s+zijn|ik\s+stel|ik\s+raad|suggestie)\b/i.test(cleaned) ||
+    /^da['’`]?s\s+een\s+/i.test(cleaned)
   ) {
     return null;
   }
@@ -357,13 +359,19 @@ function fallbackGeneratedSessionTitle(value: string | null | undefined): string
   if (!raw) {
     return null;
   }
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   const preferredLine =
-    raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => /^Nieuw bericht:/i.test(line)) ?? raw;
+    lines.find((line) => /^Nieuw bericht:/i.test(line)) ??
+    lines.find((line) => /^Gebruiker:/i.test(line)) ??
+    lines.find((line) => /^User:/i.test(line));
+  if (!preferredLine) {
+    return null;
+  }
   const cleaned = preferredLine
-    .replace(/^\s*(?:Nieuw bericht|Gebruiker|Assistent|User|Assistant)\s*:\s*/i, "")
+    .replace(/^\s*(?:Nieuw bericht|Gebruiker|User)\s*:\s*/i, "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/https?:\/\/\S+/gi, " ")
     .replace(/[`*_#[\]()>~|{}]/g, " ")
@@ -424,10 +432,11 @@ async function readSessionTitleContext(params: {
   storePath: string | undefined;
   message?: string;
 }): Promise<string> {
-  const parts: string[] = [];
+  const userParts: string[] = [];
+  const contextParts: string[] = [];
   const message = normalizeOptionalString(params.message);
   if (message) {
-    parts.push(`Nieuw bericht: ${message}`);
+    userParts.push(`Nieuw bericht: ${message}`);
   }
   if (params.entry?.sessionId) {
     const { messages } = await readRecentSessionMessagesWithStatsAsync(
@@ -443,11 +452,26 @@ async function readSessionTitleContext(params: {
       const text = extractTitleContextText(item);
       if (text) {
         const role = normalizeOptionalLowercaseString((item as Record<string, unknown>).role);
-        parts.push(`${role === "assistant" ? "Assistent" : "Gebruiker"}: ${text}`);
+        if (role === "user") {
+          userParts.push(`Gebruiker: ${text}`);
+        } else if (role === "assistant") {
+          contextParts.push(`Assistent context: ${text}`);
+        }
       }
     }
   }
-  return parts.join("\n").slice(0, 6_000);
+  return [
+    "Maak een korte chat-titel op basis van alleen de gebruikersberichten hieronder.",
+    "Assistent context mag helpen om het onderwerp te begrijpen, maar mag nooit letterlijk als titel worden gebruikt.",
+    "",
+    "Gebruikersberichten:",
+    ...(userParts.length ? userParts : ["Gebruiker:"]),
+    "",
+    "Assistent context:",
+    ...contextParts.slice(-3),
+  ]
+    .join("\n")
+    .slice(0, 6_000);
 }
 
 function rejectPluginRuntimeDeleteMismatch(params: {
@@ -2513,7 +2537,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           prompt:
             'Return only minified JSON in this exact shape: {"title":"..."} ' +
             "You are naming a private ChatGPT-style conversation for a sidebar. " +
-            "The title must summarize the user's actual topic, not your action. " +
+            "The title must summarize only the user's request/topic from the Gebruikersberichten section. " +
+            "Do not copy assistant/tool-result wording, greetings, jokes, or response phrasing. " +
             "Never write explanation, markdown, quotes around the JSON, XML, labels, or phrases like 'here is', 'I suggest', or 'title:'. " +
             "Use the same language as the latest user message. Keep title specific, friendly, and 2-7 words. " +
             'Bad: {"title":"Here is a title I suggest: API Setup Help"}. Good: {"title":"API Setup Help"}.',

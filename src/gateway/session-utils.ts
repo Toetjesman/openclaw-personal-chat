@@ -224,11 +224,6 @@ export function deriveSessionTitle(
     return undefined;
   }
 
-  // AI-generated auto-title takes highest priority when available.
-  if (normalizeOptionalString(entry.autoTitle)) {
-    return normalizeOptionalString(entry.autoTitle);
-  }
-
   if (normalizeOptionalString(entry.displayName)) {
     return normalizeOptionalString(entry.displayName);
   }
@@ -240,6 +235,10 @@ export function deriveSessionTitle(
   if (firstUserMessage?.trim()) {
     const normalized = firstUserMessage.replace(/\s+/g, " ").trim();
     return truncateTitle(normalized, DERIVED_TITLE_MAX_LEN);
+  }
+
+  if (normalizeOptionalString(entry.autoTitle)) {
+    return normalizeOptionalString(entry.autoTitle);
   }
 
   if (entry.sessionId) {

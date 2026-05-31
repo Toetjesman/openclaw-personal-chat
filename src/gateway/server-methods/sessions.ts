@@ -256,6 +256,17 @@ function isNewChatPlaceholderLabel(label: string | undefined | null): boolean {
   return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
 }
 
+function isAssistantLikeGeneratedTitle(label: string | undefined | null): boolean {
+  const normalized = normalizeOptionalLowercaseString(label) ?? "";
+  return (
+    /^da['’`]?s\s+een\s+/.test(normalized) ||
+    /\b(here is|here['’`]?s|i suggest|i recommend|suggested title|recommended title)\b/.test(
+      normalized,
+    ) ||
+    /\b(hier is|hier zijn|ik stel|ik raad|suggestie)\b/.test(normalized)
+  );
+}
+
 function extractGeneratedTitleJson(value: string): string | null {
   const candidates = [value];
   const objectMatch = value.match(/\{[\s\S]*\}/);
@@ -2497,7 +2508,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const store = loadSessionStore(storePath);
     const entry = resolveFreshestSessionEntryFromStoreKeys(store, target.storeKeys);
     const currentLabel = normalizeOptionalString(entry?.label);
-    if (!p.force && currentLabel && !isNewChatPlaceholderLabel(currentLabel)) {
+    if (
+      !p.force &&
+      currentLabel &&
+      !isNewChatPlaceholderLabel(currentLabel) &&
+      !isAssistantLikeGeneratedTitle(currentLabel)
+    ) {
       respond(true, {
         ok: true,
         key: target.canonicalKey ?? key,
@@ -2566,7 +2582,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         store: nextStore,
         agentId: requestedAgentId,
       });
-      return await applySessionsPatchToStore({
+      const result = await applySessionsPatchToStore({
         cfg,
         store: nextStore,
         storeKey: primaryKey,
@@ -2574,6 +2590,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         patch,
         loadGatewayModelCatalog: context.loadGatewayModelCatalog,
       });
+      if (result.ok) {
+        delete result.entry.autoTitle;
+        delete result.entry.autoTitleGeneratedAt;
+        delete result.entry.autoTitleTurnsCount;
+      }
+      return result;
     });
     if (!applied.ok) {
       respond(false, undefined, applied.error);

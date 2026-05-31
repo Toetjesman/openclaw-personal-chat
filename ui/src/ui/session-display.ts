@@ -99,16 +99,15 @@ export function resolveSessionDisplayName(
   if (label && label !== key) {
     return applyTypedPrefix(label);
   }
-  // AI-generated auto-title from older metadata is still useful when no label exists.
-  if (autoTitle && autoTitle !== key) {
-    return applyTypedPrefix(autoTitle);
-  }
   // Derived title (from first message or displayName/subject) next.
   if (derivedTitle && derivedTitle !== key) {
     return applyTypedPrefix(derivedTitle);
   }
   if (displayName && displayName !== key) {
     return applyTypedPrefix(displayName);
+  }
+  if (autoTitle && autoTitle !== key) {
+    return applyTypedPrefix(autoTitle);
   }
   return fallbackName;
 }

@@ -209,9 +209,20 @@ function isNewChatPlaceholder(label: string | undefined | null): boolean {
   return /^new chat(?:\s+\d+)?$/i.test(label?.trim() ?? "");
 }
 
+function isAssistantLikeGeneratedTitle(label: string | undefined | null): boolean {
+  const normalized = normalizeLowercaseStringOrEmpty(label);
+  return (
+    /^da['’`]?s\s+een\s+/.test(normalized) ||
+    /\b(here is|here['’`]?s|i suggest|i recommend|suggested title|recommended title)\b/.test(
+      normalized,
+    ) ||
+    /\b(hier is|hier zijn|ik stel|ik raad|suggestie)\b/.test(normalized)
+  );
+}
+
 function sessionAlreadyHasFriendlyTitle(row: SessionsListResult["sessions"][number] | undefined) {
   const label = row?.label?.trim();
-  return Boolean(label && !isNewChatPlaceholder(label));
+  return Boolean(label && !isNewChatPlaceholder(label) && !isAssistantLikeGeneratedTitle(label));
 }
 
 function shouldAutoTitleSession(host: ChatHost, sessionKey: string) {
@@ -244,6 +255,11 @@ export async function maybeAutoTitleChatSession(
     const payload = (await host.client.request("sessions.title", {
       key: sessionKey,
       ...(normalizedMessage ? { message: normalizedMessage } : {}),
+      ...(isAssistantLikeGeneratedTitle(
+        host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
+      )
+        ? { force: true }
+        : {}),
     })) as { label?: string | null; updated?: boolean };
     const title = normalizeOptionalString(payload?.label);
     if (!title) {

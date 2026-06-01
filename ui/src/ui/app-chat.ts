@@ -230,13 +230,85 @@ function isPromptLikeGeneratedTitle(label: string | undefined | null): boolean {
   );
 }
 
+const TITLE_FUNCTION_WORDS = new Set([
+  "a",
+  "aan",
+  "alleen",
+  "and",
+  "can",
+  "could",
+  "dat",
+  "de",
+  "een",
+  "en",
+  "er",
+  "for",
+  "het",
+  "i",
+  "ik",
+  "in",
+  "is",
+  "it",
+  "je",
+  "jij",
+  "kan",
+  "kun",
+  "kunt",
+  "me",
+  "met",
+  "moest",
+  "niet",
+  "niks",
+  "of",
+  "om",
+  "op",
+  "or",
+  "te",
+  "tegen",
+  "that",
+  "the",
+  "to",
+  "u",
+  "van",
+  "voor",
+  "was",
+  "wat",
+  "will",
+  "with",
+  "would",
+  "you",
+  "zei",
+  "zijn",
+  "zou",
+]);
+
+function titleContentWords(label: string): string[] {
+  return label
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 2 && !TITLE_FUNCTION_WORDS.has(word));
+}
+
+function isContentlessGeneratedTitle(label: string | undefined | null): boolean {
+  const trimmed = label?.trim();
+  if (!trimmed) {
+    return true;
+  }
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const contentWords = titleContentWords(trimmed);
+  return contentWords.length === 0 || (contentWords.length === 1 && words.length > 3);
+}
+
 function sessionAlreadyHasFriendlyTitle(row: SessionsListResult["sessions"][number] | undefined) {
   const label = row?.label?.trim();
   return Boolean(
     label &&
-      !isNewChatPlaceholder(label) &&
-      !isAssistantLikeGeneratedTitle(label) &&
-      !isPromptLikeGeneratedTitle(label),
+    !isNewChatPlaceholder(label) &&
+    !isAssistantLikeGeneratedTitle(label) &&
+    !isPromptLikeGeneratedTitle(label) &&
+    !isContentlessGeneratedTitle(label),
   );
 }
 
@@ -274,6 +346,9 @@ export async function maybeAutoTitleChatSession(
         host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
       ) ||
       isPromptLikeGeneratedTitle(
+        host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
+      ) ||
+      isContentlessGeneratedTitle(
         host.sessionsResult?.sessions.find((session) => session.key === sessionKey)?.label,
       )
         ? { force: true }

@@ -395,6 +395,119 @@ function normalizeTitleComparisonWords(value: string): string[] {
     .filter(Boolean);
 }
 
+const SESSION_TITLE_FUNCTION_WORDS = new Set([
+  "a",
+  "aan",
+  "about",
+  "again",
+  "al",
+  "alleen",
+  "als",
+  "and",
+  "are",
+  "as",
+  "at",
+  "be",
+  "ben",
+  "bij",
+  "can",
+  "could",
+  "dat",
+  "de",
+  "did",
+  "die",
+  "dit",
+  "do",
+  "does",
+  "doing",
+  "door",
+  "een",
+  "en",
+  "er",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "he",
+  "het",
+  "hier",
+  "him",
+  "hoe",
+  "i",
+  "ik",
+  "in",
+  "is",
+  "it",
+  "je",
+  "jij",
+  "kan",
+  "kun",
+  "kunt",
+  "maar",
+  "me",
+  "met",
+  "mijn",
+  "moest",
+  "naar",
+  "niet",
+  "niks",
+  "nog",
+  "of",
+  "om",
+  "on",
+  "ons",
+  "onze",
+  "ook",
+  "op",
+  "or",
+  "over",
+  "please",
+  "she",
+  "te",
+  "tegen",
+  "that",
+  "the",
+  "this",
+  "to",
+  "u",
+  "van",
+  "voor",
+  "was",
+  "wat",
+  "we",
+  "wel",
+  "were",
+  "will",
+  "with",
+  "would",
+  "you",
+  "zei",
+  "ze",
+  "zijn",
+  "zit",
+  "zo",
+  "zou",
+]);
+
+function normalizeTitleContentWords(value: string): string[] {
+  return normalizeTitleComparisonWords(value).filter(
+    (word) => word.length > 2 && !SESSION_TITLE_FUNCTION_WORDS.has(word),
+  );
+}
+
+function hasEnoughTitleContent(title: string): boolean {
+  const words = normalizeTitleComparisonWords(title);
+  const contentWords = normalizeTitleContentWords(title);
+  if (contentWords.length >= 2) {
+    return true;
+  }
+  if (contentWords.length === 1 && words.length <= 3 && contentWords[0]!.length >= 6) {
+    return true;
+  }
+  return false;
+}
+
 function titleCopiesUserMessage(title: string, userMessages: string[]): boolean {
   const titleWords = normalizeTitleComparisonWords(title);
   if (titleWords.length < 3) {
@@ -413,9 +526,21 @@ function titleCopiesUserMessage(title: string, userMessages: string[]): boolean 
     if (samePrefixWords / titleWords.length >= 0.8) {
       return true;
     }
+    let titleIndex = 0;
+    for (const word of messageWords.slice(0, Math.max(8, titleWords.length + 4))) {
+      if (word === titleWords[titleIndex]) {
+        titleIndex += 1;
+      }
+      if (titleIndex === titleWords.length) {
+        return true;
+      }
+    }
     const titleWordSet = new Set(titleWords);
     const overlap = messageWords.filter((word) => titleWordSet.has(word)).length;
-    if (overlap / titleWords.length >= 0.9 && titleWords.length >= 7) {
+    if (
+      (overlap / titleWords.length >= 0.75 && normalizeTitleContentWords(title).length < 2) ||
+      (overlap / titleWords.length >= 0.9 && titleWords.length >= 7)
+    ) {
       return true;
     }
   }
@@ -428,6 +553,9 @@ function sanitizeAiGeneratedSessionTitle(params: {
 }): string | null {
   const title = sanitizeGeneratedSessionTitle(params.value);
   if (!title) {
+    return null;
+  }
+  if (!hasEnoughTitleContent(title)) {
     return null;
   }
   if (titleCopiesUserMessage(title, extractUserTitleContextMessages(params.titleContext))) {
@@ -444,12 +572,15 @@ function titleCaseSessionWord(word: string): string {
 }
 
 function fallbackIntentSessionTitle(titleContext: string): string | null {
-  const latestUserMessage = extractUserTitleContextMessages(titleContext).at(0);
-  const raw = normalizeOptionalString(latestUserMessage);
+  const userMessages = extractUserTitleContextMessages(titleContext);
+  const raw = normalizeOptionalString(userMessages.join("\n"));
   if (!raw) {
     return null;
   }
-  const normalized = raw.toLowerCase();
+  const normalized = `${raw}\n${titleContext}`.toLowerCase();
+  if (/\bscreenshots?\b/.test(normalized) || /\bschermafbeelding(?:en)?\b/.test(normalized)) {
+    return "Screenshot Instructies";
+  }
   if (/\b(ms\s*)?planner\b/.test(normalized)) {
     return "MS Planner Overzicht";
   }
@@ -484,6 +615,14 @@ function fallbackIntentSessionTitle(titleContext: string): string | null {
     "could",
     "would",
     "will",
+    "ik",
+    "zei",
+    "tegen",
+    "dat",
+    "alleen",
+    "moest",
+    "verder",
+    "niks",
     "je",
     "jij",
     "u",
@@ -608,8 +747,8 @@ async function readSessionTitleContext(params: {
       params.storePath,
       params.entry.sessionFile,
       {
-        maxMessages: 8,
-        maxLines: 180,
+        maxMessages: 20,
+        maxLines: 260,
       },
     );
     for (const item of messages) {
@@ -625,8 +764,9 @@ async function readSessionTitleContext(params: {
     }
   }
   return [
-    "Maak een korte chat-titel op basis van alleen de gebruikersberichten hieronder.",
-    "Assistent context mag helpen om het onderwerp te begrijpen, maar mag nooit letterlijk als titel worden gebruikt.",
+    "Maak een korte chat-titel op basis van de volledige gesprekscontext hieronder.",
+    "Gebruik de gebruikersberichten als bron van waarheid en gebruik assistent context alleen om het onderwerp te begrijpen.",
+    "Vat het gespreksonderwerp samen; kopieer geen losse zin, klacht of correctie uit het laatste bericht.",
     "",
     "Gebruikersberichten:",
     ...(userParts.length ? userParts : ["Gebruiker:"]),
@@ -2711,7 +2851,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         prompt:
           'Return only minified JSON in this exact shape: {"title":"..."} ' +
           "You are naming a private ChatGPT-style conversation for a sidebar. " +
-          "The title must summarize only the user's request/topic from the Gebruikersberichten section. " +
+          "Read the whole conversation context, then summarize the central task/topic from the Gebruikersberichten section. " +
+          "If the latest user message is a correction or complaint, infer the underlying conversation topic instead of naming the complaint. " +
           "Do not copy the user's sentence. Compress it into a short topic label, like ChatGPT's sidebar titles. " +
           "Do not copy assistant/tool-result wording, greetings, jokes, or response phrasing. " +
           "Never write explanation, markdown, quotes around the JSON, XML, labels, or phrases like 'here is', 'I suggest', or 'title:'. " +
@@ -2728,7 +2869,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           ...titleGenerationBase,
           prompt:
             'Return only minified JSON in this exact shape: {"title":"..."} ' +
-            "Create a sidebar title from the user's intent, not from the user's wording. " +
+            "Create a sidebar title from the whole conversation's intent, not from the user's wording. " +
+            "Prefer the stable topic across the conversation over a random recent sentence. " +
             "If the user writes a full sentence, replace it with a compact noun phrase. " +
             "Forbidden: copying the first words of the user message, adding commentary, or using assistant/tool text. " +
             "Allowed: 2-5 words that name the task/topic. Use the user's language. " +

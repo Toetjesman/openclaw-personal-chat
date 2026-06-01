@@ -455,10 +455,10 @@ function renderSidebarSessions(state: AppViewState) {
     : `${chatHistory.length}`;
   const newSessionDisabled = !state.connected || state.sessionsLoading || busy || !state.client;
   const newSessionTitle = !state.connected
-    ? "Connect to create a new session"
+    ? t("chat.sidebar.connectToCreate")
     : busy
-      ? "Finish the active run before creating a new session"
-      : "New session";
+      ? t("chat.sidebar.finishActiveRun")
+      : t("chat.runControls.newSession");
 
   return html`
     <section class="sidebar-sessions ${collapsed ? "sidebar-sessions--collapsed" : ""}">
@@ -494,16 +494,16 @@ function renderSidebarSessions(state: AppViewState) {
               @click=${() => openChatHistoryDialog(state)}
             >
               <span class="sidebar-all-chats__icon" aria-hidden="true">${icons.fileText}</span>
-              <span>Alle chats</span>
+              <span>${t("chat.sidebar.allChats")}</span>
             </button>
             ${chatHistory.length === 0
               ? html`
                   <div class="sidebar-recent-sessions__empty">
                     ${searchLoading
-                      ? "Chatgeschiedenis doorzoeken..."
+                      ? t("chat.sidebar.searchingHistory")
                       : state.chatSidebarSessionAppliedQuery.trim()
-                        ? "Geen chats gevonden"
-                        : "Nog geen chatgeschiedenis"}
+                        ? t("chat.sidebar.noChatsFound")
+                        : t("chat.sidebar.noHistory")}
                   </div>
                 `
               : html`
@@ -511,7 +511,7 @@ function renderSidebarSessions(state: AppViewState) {
                     class="sidebar-recent-sessions ${state.settings.recentSessionsCollapsed
                       ? "sidebar-recent-sessions--collapsed"
                       : ""}"
-                    aria-label="Chatgeschiedenis"
+                    aria-label=${t("chat.sidebar.history")}
                   >
                     <button
                       class="sidebar-recent-sessions__label"
@@ -524,7 +524,9 @@ function renderSidebarSessions(state: AppViewState) {
                         });
                       }}
                     >
-                      <span class="sidebar-recent-sessions__label-text">Chatgeschiedenis</span>
+                      <span class="sidebar-recent-sessions__label-text"
+                        >${t("chat.sidebar.history")}</span
+                      >
                       <span class="sidebar-recent-sessions__count">${historyCountLabel}</span>
                       <span class="sidebar-recent-sessions__chevron"> ${icons.chevronDown} </span>
                     </button>
@@ -540,10 +542,10 @@ function renderSidebarSessions(state: AppViewState) {
                               @click=${() => void loadMoreSidebarSessions(state)}
                             >
                               ${state.sessionsLoading
-                                ? "Laden..."
+                                ? t("chat.sidebar.loading")
                                 : canLoadMoreSidebarSessions(state)
-                                  ? "Meer laden"
-                                  : "Alles geladen"}
+                                  ? t("chat.sidebar.loadMore")
+                                  : t("chat.sidebar.allLoaded")}
                             </button>
                           `}
                     </div>
@@ -571,7 +573,7 @@ function renderChatHistoryDialog(state: AppViewState) {
       class="chat-history-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label="Alle chats"
+      aria-label=${t("chat.sidebar.allChats")}
       @keydown=${(event: KeyboardEvent) => {
         if (event.key === "Escape") {
           event.stopPropagation();
@@ -583,9 +585,11 @@ function renderChatHistoryDialog(state: AppViewState) {
       <section class="chat-history-dialog__panel">
         <header class="chat-history-dialog__header">
           <div>
-            <h2>Alle chats</h2>
+            <h2>${t("chat.sidebar.allChats")}</h2>
             <p>
-              ${state.sessionsResult?.hasMore ? `${rows.length}+ geladen` : `${rows.length} chats`}
+              ${state.sessionsResult?.hasMore
+                ? t("chat.sidebar.loadedCountPlus", { count: String(rows.length) })
+                : t("chat.sidebar.chatCount", { count: String(rows.length) })}
             </p>
           </div>
           <button
@@ -602,8 +606,8 @@ function renderChatHistoryDialog(state: AppViewState) {
           <span aria-hidden="true">${icons.search}</span>
           <input
             type="search"
-            placeholder="Zoek in alle chats"
-            aria-label="Zoek in alle chats"
+            placeholder=${t("chat.sidebar.searchAllChats")}
+            aria-label=${t("chat.sidebar.searchAllChats")}
             .value=${state.chatHistoryDialogQuery}
             @input=${(event: Event) => {
               state.chatHistoryDialogQuery = (event.target as HTMLInputElement).value;
@@ -615,17 +619,17 @@ function renderChatHistoryDialog(state: AppViewState) {
             ? html`
                 <div class="chat-history-dialog__empty">
                   ${searchLoading
-                    ? "Chatgeschiedenis doorzoeken..."
+                    ? t("chat.sidebar.searchingHistory")
                     : query
-                      ? "Geen chats gevonden"
-                      : "Nog geen chatgeschiedenis"}
+                      ? t("chat.sidebar.noChatsFound")
+                      : t("chat.sidebar.noHistory")}
                 </div>
               `
             : rows.map((row) => renderChatHistoryDialogRow(state, row, close))}
         </div>
         <footer class="chat-history-dialog__footer">
           ${query
-            ? html`<span>Zoeken kijkt in titels en geladen chatinhoud.</span>`
+            ? html`<span>${t("chat.sidebar.searchHelp")}</span>`
             : html`
                 <button
                   class="chat-history-dialog__load-more"
@@ -634,10 +638,10 @@ function renderChatHistoryDialog(state: AppViewState) {
                   @click=${() => void loadMoreSidebarSessions(state)}
                 >
                   ${state.sessionsLoading
-                    ? "Laden..."
+                    ? t("chat.sidebar.loading")
                     : canLoadMoreSidebarSessions(state)
-                      ? "Meer chats laden"
-                      : "Alle chats geladen"}
+                      ? t("chat.sidebar.loadMoreChats")
+                      : t("chat.sidebar.allChatsLoaded")}
                 </button>
               `}
         </footer>
@@ -653,7 +657,7 @@ function renderChatHistoryDialogRow(
 ) {
   const active = row.key === state.sessionKey;
   const label = resolveSessionDisplayName(row.key, row);
-  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "Geen datum";
+  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : t("chat.sidebar.noDate");
   const href = `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(row.key)}`;
   return html`
     <a
@@ -685,7 +689,10 @@ function renderChatHistoryDialogRow(
         <span class="chat-history-dialog__row-meta">${meta}</span>
       </span>
       ${row.hasActiveRun
-        ? html`<span class="chat-history-dialog__row-live" aria-label="Actieve run"></span>`
+        ? html`<span
+            class="chat-history-dialog__row-live"
+            aria-label=${t("chat.sidebar.activeRun")}
+          ></span>`
         : nothing}
     </a>
   `;
@@ -694,7 +701,7 @@ function renderChatHistoryDialogRow(
 function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow) {
   const active = row.key === state.sessionKey;
   const label = resolveSessionDisplayName(row.key, row);
-  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
+  const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : t("common.na");
   const href = `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(row.key)}`;
   return html`
     <div class="sidebar-recent-session ${active ? "sidebar-recent-session--active" : ""}">
@@ -742,11 +749,19 @@ function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow)
           const deleted = await deleteSessionsAndRefresh(
             state as unknown as Parameters<typeof deleteSessionsAndRefresh>[0],
             [row.key],
+            createChatSessionsLoadOverrides(state),
           );
           if (deleted.includes(row.key) && row.key === state.sessionKey) {
-            state.chatMessages = [];
-            state.chatToolMessages = [];
-            state.chatStream = null;
+            const nextSession = state.sessionsResult?.sessions.find(
+              (session) => !deleted.includes(session.key),
+            );
+            if (nextSession) {
+              switchChatSession(state, nextSession.key);
+            } else {
+              state.chatMessages = [];
+              state.chatToolMessages = [];
+              state.chatStream = null;
+            }
           }
           state.requestUpdate?.();
         }}

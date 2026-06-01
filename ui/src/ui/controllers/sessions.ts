@@ -1,3 +1,4 @@
+import { t } from "../../i18n/index.ts";
 import {
   reconcileChatRunFromCurrentSessionRow,
   type ChatRunUiStatus,
@@ -976,6 +977,7 @@ export async function createSessionAndRefresh(
 export async function deleteSessionsAndRefresh(
   state: SessionsState,
   keys: string[],
+  refreshOverrides?: LoadSessionsOverrides,
 ): Promise<string[]> {
   if (!state.client || !state.connected || keys.length === 0) {
     return [];
@@ -985,7 +987,13 @@ export async function deleteSessionsAndRefresh(
     return [];
   }
   const confirmed = window.confirm(
-    `Delete ${keys.length} ${keys.length === 1 ? "session" : "sessions"}?\n\nThis will delete the session entries and archive their transcripts.`,
+    t("chat.sidebar.deleteConfirm", {
+      count: String(keys.length),
+      item:
+        keys.length === 1
+          ? t("chat.sidebar.deleteConfirmOne")
+          : t("chat.sidebar.deleteConfirmMany"),
+    }),
   );
   if (!confirmed) {
     return [];
@@ -1010,7 +1018,9 @@ export async function deleteSessionsAndRefresh(
     const selectedGlobalDeleted = deleted.some((key) => isGlobalSessionKey(key));
     await loadSessions(
       state,
-      selectedGlobalDeleted ? { agentId: resolveSelectedGlobalAgentId(state) } : undefined,
+      selectedGlobalDeleted
+        ? { ...refreshOverrides, agentId: resolveSelectedGlobalAgentId(state) }
+        : refreshOverrides,
     );
   }
   if (deleteErrors.length > 0) {
